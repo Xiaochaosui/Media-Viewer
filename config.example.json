@@ -1,0 +1,14 @@
+{
+  "roots": ["/mnt/MEDIA/个人生活"],
+  "extra_roots": ["/mnt/XCS_DATA/生活记录"],
+  "remote_roots": [],
+  "port": 8777,
+  "lan": true,
+  "token": "换成你自己的口令",
+  "thumb_px": 480,
+  "vlc_args": [],
+  "launch_mode": "auto",
+  "open_browser": true,
+  "watch": 20,
+  "pair_raw": true
+}

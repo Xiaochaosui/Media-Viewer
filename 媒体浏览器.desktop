@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=媒体浏览器
+Name[en]=Media Browser
+GenericName=缩略图浏览图片和视频
+Comment=缩略图墙浏览图片和视频：视频用 VLC 播放，图片看原图
+Exec=/mnt/MEDIA/个人生活/媒体浏览器/启动.sh
+Path=/mnt/MEDIA/个人生活/媒体浏览器
+Terminal=true
+Icon=multimedia-player
+StartupNotify=true
+Categories=AudioVideo;Graphics;
+Keywords=media;video;photo;thumbnail;vlc;图片;视频;缩略图;媒体;
