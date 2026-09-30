@@ -57,7 +57,8 @@
 - 目录窗口里除了本机路径，还能填**另一台机器的媒体浏览器地址**（`http://192.168.x.x:8899`），
   两台的素材合并成一堵墙，能看能下
 
-> 截图里的照片都做过马赛克处理，不涉及真实素材。
+* 截图用的是一组**示例素材**（风景、静物，**不含人物**）—— 你自己用起来就是自己的文件夹、自己的文件名。
+> 手机那两张是**局域网客户端**视角（所以底栏有「🔒 局域网模式」、没有「全部解码」这类只在本机做的操作）。
 
 ---
 
@@ -687,7 +688,7 @@ macOS 用系统自带的 `sips`/`qlmanage`/`mdls`，Windows 用 PowerShell + .NE
 
 几点说明：
 
-- README 里的截图都做过**马赛克处理**，不包含真实素材
+- README 里的截图取自一组**示例素材**（风景与静物，不含人物）
 - `config.json` 里有本机路径和局域网口令，**已排除在仓库外**（`.gitignore`）；
   要一份能直接抄的模板看 [config.example.json](config.example.json)
 - 文档和界面提示里出现的 IP 一律写成 `192.168.x.x` 这种占位形式（**真实内网 IP 不外露**），
@@ -715,4 +716,4 @@ step. Pillow, ffmpeg, VLC and rawpy are all optional: the tool picks whatever th
 (macOS `sips`/`qlmanage`/`mdls`, Windows PowerShell/.NET, Linux `eog`/`zenity`/`gio`) and degrades
 gracefully — run `./启动.sh --check` to see what it found.
 
-MIT licensed. Screenshots are pixelated; no real media is included.
+MIT licensed. Screenshots show a small sample set (landscapes and still life, no people).
