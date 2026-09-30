@@ -10,8 +10,8 @@
 点开就能看详情（尺寸 / 时长 / 编码 / EXIF / 路径）；
 **视频一键交给本机 VLC 播放，图片交给本机看图工具看原图（有 RAW 就直接解 RAW 全尺寸）**。
 
-- 目录：`/mnt/MEDIA/个人生活/媒体浏览器/`
-- 桌面图标：`~/桌面/媒体浏览器.desktop`（双击即用，已装好）
+- 工程目录：`/mnt/XCS_DATA/个人项目/媒体浏览器/`
+- 桌面图标：`~/桌面/媒体浏览器.desktop` —— **双击一键启动**（应用菜单里也注册了一份）
 - 当前素材量下（96 个视频 + 78 张照片 + 78 个 RAW），首次扫描约 0.2 秒，缩略图 174 张全部生成约 25 秒（之后秒开）
 - 界面里可以直接**加别的文件夹**（系统选择框或手输路径），加了会记住，下次启动还在
 - 富士 `.RAF` 能**解出 40MP 全尺寸原图**来看（不是那张缩小的内嵌预览）
@@ -69,14 +69,19 @@
 命令行方式：
 
 ```bash
-cd /mnt/MEDIA/个人生活/媒体浏览器
-./启动.sh                     # 浏览 /mnt/MEDIA/个人生活（默认），需要别的目录时在界面里加
+cd /mnt/XCS_DATA/个人项目/媒体浏览器
+./启动.sh                     # 不带参数：自动挑存在且有内容的素材目录（见下面的说明）
 ./启动.sh ~/Pictures          # 浏览指定目录
 ./启动.sh ~/A ~/B             # 浏览多个目录
 ./启动.sh --lan               # 顺便开放局域网：手机 / 别的电脑也能看（只读）
 MEDIA_BROWSER_LAN=1 ./启动.sh # 同上，用环境变量写法
 ./启动.sh --lan --token 我的口令   # 局域网里也想能点「打开/播放」（口令自己定）
 ```
+
+**不带参数时会自动挑目录**（`启动.py` 里的候选表，只取**存在且里面有东西**的）：
+Linux 依次看 `/mnt/MEDIA/个人生活` → `/mnt/XCS_DATA/生活记录` → `/mnt/XCS_DATA/个人生活` → `~/图片`，最多 3 个；
+一个都没有才退到家目录。外接盘没挂上时不会报「目录不存在」，直接跳过 —— 想让它出现就先挂上盘，
+或者在界面里「📚 目录」加一次（会记住）。
 
 > `启动.sh` 会把选项和目录分开处理，`--lan`、`--token 口令`、`--warmup none` 这类
 > 选项不会被当成目录去检查，原样转给 `media_browser.py`。
@@ -87,7 +92,7 @@ MEDIA_BROWSER_LAN=1 ./启动.sh # 同上，用环境变量写法
 也可以双击工具目录里的 **`媒体浏览器.desktop`**（或在终端里）：
 
 ```bash
-python3 media_browser.py /mnt/MEDIA/个人生活
+python3 media_browser.py /mnt/XCS_DATA/生活记录
 ```
 
 启动后终端会打印地址（默认 <http://127.0.0.1:8777/>），浏览器会自动打开。
@@ -96,7 +101,7 @@ python3 media_browser.py /mnt/MEDIA/个人生活
 > 已经在运行时再点一次桌面图标，不会起第二个实例 —— 脚本会认出服务在跑，
 > 直接把浏览器窗口叫到前台。换端口用环境变量：`MEDIA_BROWSER_PORT=8899 ./启动.sh`。
 
-> 端口被占用时换个端口：`python3 media_browser.py /mnt/MEDIA/个人生活 -p 8899`
+> 端口被占用时换个端口：`python3 media_browser.py /mnt/XCS_DATA/生活记录 -p 8899`
 
 ### 同一套代码，三个平台怎么起
 
@@ -212,8 +217,8 @@ python3 media_browser.py /mnt/MEDIA/个人生活
 **放在 RAW 照片的旁边**，不塞在系统缓存里：
 
 ```
-/mnt/MEDIA/个人生活/FUSHI/
-├── DSCF6997.RAF          ← 原片 82 MB
+/照片/2025-11-18/
+├── DSCF6993.RAF          ← 原片 82 MB
 ├── DSCF6997.JPG          ← 相机直出 16 MB
 └── RAW解码/
     └── DSCF6997.jpg      ← 解出来的全尺寸 40MP（约 16 MB）
@@ -279,7 +284,7 @@ RAW 只是一堆原始感光数据，**怎么解是你说了算**，不同解法
 **根本不认识 X-T50**；系统又没装 pip。所以走的是「直接解压 PyPI 上的 manylinux 轮子」这条路：
 
 ```bash
-cd /mnt/MEDIA/个人生活/媒体浏览器
+cd /mnt/XCS_DATA/个人项目/媒体浏览器
 ./安装RAW支持.sh          # 装到 1T 固态 /mnt/XCS_DATA/xcs-cache/pylibs（默认，约 71MB）
 ./安装RAW支持.sh --local  # 装到家目录 ~/.local/lib/media-browser/pylibs
 ./安装RAW支持.sh --check  # 看看现在能不能解
@@ -521,7 +526,7 @@ python3 media_browser.py [目录...] [选项]
 
 ```json
 {
-  "roots": ["/mnt/MEDIA/个人生活"],
+  "roots": ["/mnt/XCS_DATA/生活记录"],
   "port": 8777,
   "thumb_px": 480,
   "vlc_args": ["--one-instance"],
@@ -574,9 +579,18 @@ python3 media_browser.py [目录...] [选项]
 单张临时切换不用改设置。
 
 **Q：桌面上的「媒体浏览器」图标是怎么装的？**
-`媒体浏览器.desktop` 复制到 `~/桌面/` 和 `~/.local/share/applications/`，
-再 `gio set ~/桌面/媒体浏览器.desktop metadata::trusted true`（GNOME 认这个标记才让直接双击运行）。
-图标改了以后重新 `install -m 755 媒体浏览器.desktop ~/桌面/` 覆盖一下即可。
+工程里带了一个 `媒体浏览器.desktop`，内容就是「在工程目录里跑 `启动.sh`，用终端打开」：
+
+```bash
+cd /mnt/XCS_DATA/个人项目/媒体浏览器
+install -m 755 媒体浏览器.desktop ~/桌面/                          # 桌面图标
+install -m 755 媒体浏览器.desktop ~/.local/share/applications/      # 应用菜单里也来一份
+gio set ~/桌面/媒体浏览器.desktop metadata::trusted true            # GNOME 认这个标记才让直接双击
+desktop-file-validate ~/桌面/媒体浏览器.desktop                     # 校验一下（可选）
+```
+
+换机器/换目录时：改 `.desktop` 里的 `Exec=` 和 `Path=` 两行，再照上面覆盖一次即可。
+双击的行为：**已经在跑就直接把浏览器叫到前台**，没跑就起服务并打开页面；窗口关掉或 `Ctrl+C` 就是停止。
 
 **Q：点了图片，弹出的是本机看图器而不是浏览器，是坏了吗？**
 没坏，这是设计：图片一律交给**本机看图工具看原图**（默认 `eog`），
@@ -662,7 +676,7 @@ macOS 用系统自带的 `sips`/`qlmanage`/`mdls`，Windows 用 PowerShell + .NE
 | `启动.bat` | Windows **双击**用（找 `py -3` / `python`，转发给 `启动.py`） |
 | `安装RAW支持.sh` | 装/卸 RAW 全尺寸解码库（不需要 sudo），`--check` 看状态 |
 | `迁移缓存到固态.sh` | 把 `~/.cache` 搬到 1T 固态并做软链（`--dry-run` / `--rollback`） |
-| `媒体浏览器.desktop` | 桌面快捷方式（可复制到 `~/.local/share/applications/`） |
+| `媒体浏览器.desktop` | 桌面一键启动图标（双击跑 `启动.sh`；装法见 FAQ） |
 | `config.json` | 可选配置文件；界面里加的目录记在它的 `extra_roots` 里（不存在则用默认值）。**含口令，已在 .gitignore 里排除** |
 | `config.example.json` | 配置模板，抄成 `config.json` 再改 |
 | `LICENSE.md` | MIT 许可证 |
@@ -672,7 +686,7 @@ macOS 用系统自带的 `sips`/`qlmanage`/`mdls`，Windows 用 PowerShell + .NE
 
 ```json
 {
-  "roots": ["/mnt/MEDIA/个人生活"],
+  "roots": ["/mnt/XCS_DATA/生活记录"],
   "extra_roots": ["/home/xcs/图片", "/mnt/XCS_DATA/照片"],
   "port": 8777,
   "vlc_args": ["--one-instance"]
@@ -692,7 +706,7 @@ macOS 用系统自带的 `sips`/`qlmanage`/`mdls`，Windows 用 PowerShell + .NE
 - `config.json` 里有本机路径和局域网口令，**已排除在仓库外**（`.gitignore`）；
   要一份能直接抄的模板看 [config.example.json](config.example.json)
 - 文档和界面提示里出现的 IP 一律写成 `192.168.x.x` 这种占位形式（**真实内网 IP 不外露**），
-  照抄时换成你自己的地址；`/mnt/MEDIA/个人生活` 这类路径是本机实际环境的例子，同理替换
+  照抄时换成你自己的地址；文档里的 `/mnt/XCS_DATA/生活记录`、`/照片` 这类路径也只是例子，同理替换
 - 第三方工具各按各的许可：ffmpeg（LGPL/GPL）、VLC（GPL）、Pillow（HPND）、rawpy/libraw（LGPL/CDDL）
   —— 本工具只是调用它们，不打包、不分发
 

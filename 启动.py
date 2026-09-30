@@ -33,7 +33,47 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 TOOL = HERE / "media_browser.py"
-DEFAULT_DIR = "/mnt/MEDIA/个人生活" if sys.platform.startswith("linux") else str(Path.home() / "Pictures")
+
+# 不带目录启动时去哪儿找素材：按顺序取**真实存在**的那几个 ——
+# 外接盘/移动盘没挂上就自动跳过，不会像写死一个路径那样直接报「目录不存在」。
+DEFAULT_DIRS = {
+    "linux": ["/mnt/MEDIA/个人生活", "/mnt/XCS_DATA/生活记录",
+              "/mnt/XCS_DATA/个人生活", str(Path.home() / "图片"), str(Path.home() / "Pictures")],
+    "darwin": [str(Path.home() / "Pictures"), str(Path.home() / "Movies")],
+    "win": [str(Path.home() / "Pictures"), str(Path.home() / "Videos")],
+}
+
+
+def default_dirs(limit: int = 3) -> list:
+    """这台机器上真实存在、而且**里面确实有东西**的默认素材目录。
+
+    空的目录（比如挂载点还在、盘没挂上）会被跳过 —— 免得一上来就是个空墙。
+    """
+    key = "win" if os.name == "nt" else ("darwin" if sys.platform == "darwin" else "linux")
+    cands = DEFAULT_DIRS.get(key, [])
+    found: list[str] = []
+
+    def usable(p: Path) -> bool:
+        try:
+            if not p.is_dir():
+                return False
+            next(p.iterdir())          # 空的就跳过（挂载点没挂上通常是空的）
+            return True
+        except StopIteration:
+            return False
+        except OSError:
+            return False
+
+    for d in cands:
+        p = Path(d).expanduser()
+        if str(p) not in found and usable(p):
+            found.append(str(p))
+        if len(found) >= limit:
+            break
+    return found or [str(Path.home())]
+
+
+DEFAULT_DIR = default_dirs()[0]
 
 IS_WIN = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
@@ -231,11 +271,12 @@ def main(argv: list[str]) -> int:
     if lan and "--lan" not in rest:
         rest.append("--lan")
     if not dirs:
-        dirs = [DEFAULT_DIR]
+        dirs = default_dirs()
     missing = [d for d in dirs if not Path(d).expanduser().exists()]
     if missing:
         say("目录不存在：%s" % "、".join(missing))
-        say("（默认目录是 %s，不存在就先用参数指定别的，或者直接手输路径）" % DEFAULT_DIR)
+        say("（现在会自动找这几个：%s）" % "、".join(default_dirs()))
+        say(" 要浏览别的地方就带上路径，例如：./启动.sh /mnt/XCS_DATA/某目录")
         return 1
 
     ips = lan_ips()
