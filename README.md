@@ -66,6 +66,10 @@
 
 **最省事的用法：双击桌面上的「媒体浏览器」图标。**
 
+图标走的是 `启动-静默.sh`：**后台起服务、不弹终端窗口**，起好后在右上角弹一条桌面通知
+（本机地址 + 手机地址），浏览器自动打开。已经在跑的时候再点，它只会把浏览器叫到前台，
+不会起第二个实例。想看扫描日志就用 `./启动.sh`，或应用菜单里的「媒体浏览器（带日志窗口）」。
+
 命令行方式：
 
 ```bash
@@ -579,18 +583,39 @@ python3 media_browser.py [目录...] [选项]
 单张临时切换不用改设置。
 
 **Q：桌面上的「媒体浏览器」图标是怎么装的？**
-工程里带了一个 `媒体浏览器.desktop`，内容就是「在工程目录里跑 `启动.sh`，用终端打开」：
+工程里带了两个 `.desktop`：`媒体浏览器.desktop`（**静默版，桌面图标用这个**）和
+`媒体浏览器-日志.desktop`（带终端窗口，能看日志，放应用菜单里）。
 
 ```bash
 cd /data/Projects/媒体浏览器
-install -m 755 媒体浏览器.desktop ~/桌面/                          # 桌面图标
-install -m 755 媒体浏览器.desktop ~/.local/share/applications/      # 应用菜单里也来一份
-gio set ~/桌面/媒体浏览器.desktop metadata::trusted true            # GNOME 认这个标记才让直接双击
-desktop-file-validate ~/桌面/媒体浏览器.desktop                     # 校验一下（可选）
+install -m 755 媒体浏览器.desktop      ~/桌面/                       # 桌面图标（不弹终端）
+install -m 755 媒体浏览器.desktop      ~/.local/share/applications/   # 应用菜单也来一份
+install -m 755 媒体浏览器-日志.desktop  ~/.local/share/applications/   # 想看得见日志的那份
+gio set ~/桌面/媒体浏览器.desktop metadata::trusted true             # GNOME 认这个标记才让直接双击
+desktop-file-validate ~/桌面/媒体浏览器.desktop                      # 校验一下（可选）
 ```
 
 换机器/换目录时：改 `.desktop` 里的 `Exec=` 和 `Path=` 两行，再照上面覆盖一次即可。
-双击的行为：**已经在跑就直接把浏览器叫到前台**，没跑就起服务并打开页面；窗口关掉或 `Ctrl+C` 就是停止。
+
+**Q：双击图标之后"什么都没发生"？**
+静默模式下**不会有终端窗口**，只有右上角一条桌面通知。如果连通知都没有，按顺序查：
+
+```bash
+cat ~/.cache/media-browser/启动.log        # 启动日志都在这儿（超过 2MB 自动留一份 .1）
+curl -s http://127.0.0.1:8777/api/ping     # 服务到底起来没有
+```
+
+常见原因：素材盘没挂上（日志里有「目录不存在，已忽略」）、端口被别的程序占了（换 `-p 8899`）。
+想一直看得见输出，就用 `./启动.sh` 或应用菜单里的「媒体浏览器（带日志窗口）」。
+
+**Q：没有终端窗口了，怎么停止服务？**
+静默启动是后台进程，关窗口那套不管用了。三种都行：
+
+```bash
+pkill -f 'media_browser.py'                # 最直接
+fuser -k 8777/tcp                          # 按端口杀（换个端口就改数字）
+# 或者用带日志窗口的那个图标启动，之后 Ctrl+C / 关窗口即可
+```
 
 **Q：点了图片，弹出的是本机看图器而不是浏览器，是坏了吗？**
 没坏，这是设计：图片一律交给**本机看图工具看原图**（默认 `eog`），
@@ -676,7 +701,9 @@ macOS 用系统自带的 `sips`/`qlmanage`/`mdls`，Windows 用 PowerShell + .NE
 | `启动.bat` | Windows **双击**用（找 `py -3` / `python`，转发给 `启动.py`） |
 | `安装RAW支持.sh` | 装/卸 RAW 全尺寸解码库（不需要 sudo），`--check` 看状态 |
 | `迁移缓存到固态.sh` | 把 `~/.cache` 搬到 1T 固态并做软链（`--dry-run` / `--rollback`） |
-| `媒体浏览器.desktop` | 桌面一键启动图标（双击跑 `启动.sh`；装法见 FAQ） |
+| `启动-静默.sh` | 桌面图标用的入口：后台起服务、不弹终端，起好后发桌面通知，日志写 `~/.cache/media-browser/启动.log` |
+| `媒体浏览器.desktop` | 桌面一键启动图标（静默版，`Terminal=false`；装法见 FAQ） |
+| `媒体浏览器-日志.desktop` | 带终端窗口的版本，能看实时日志（放应用菜单里） |
 | `config.json` | 可选配置文件；界面里加的目录记在它的 `extra_roots` 里（不存在则用默认值）。**含口令，已在 .gitignore 里排除** |
 | `config.example.json` | 配置模板，抄成 `config.json` 再改 |
 | `LICENSE.md` | MIT 许可证 |

@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=媒体浏览器（带日志窗口）
+Name[en]=Media Browser (with log window)
+GenericName=缩略图浏览图片和视频
+Comment=前台启动，终端里能看见扫描进度、访问地址和日志；关掉窗口就是停止服务
+Exec=/data/Projects/媒体浏览器/启动.sh
+Path=/data/Projects/媒体浏览器
+Terminal=true
+Icon=utilities-terminal
+StartupNotify=true
+Categories=AudioVideo;Viewer;
+Keywords=media;video;photo;thumbnail;vlc;图片;视频;缩略图;媒体;日志;
