@@ -75,6 +75,9 @@ VIDEO_EXTS = {
     ".mpg", ".mpeg", ".m2ts", ".mts", ".ts", ".3gp", ".3g2", ".vob", ".rmvb",
     ".rm", ".asf", ".divx", ".ogv", ".mxf", ".insv", ".lrv",
 }
+# 跟照片同名的"伴随文件"：改名时一起改，免得 .xmp/.dop 跟照片分了家
+SIDECAR_EXTS = {".xmp", ".dop", ".pp3", ".aae", ".thm", ".cos", ".wav"}
+
 # 明显不是媒体、但可能出现在素材目录里的东西
 SKIP_DIR_NAMES = {
     ".git", ".svn", ".hg", "__pycache__", "node_modules", "$RECYCLE.BIN",
@@ -1226,6 +1229,14 @@ def root_key(p: Path) -> str:
     return hashlib.sha1(str(p).encode("utf-8")).hexdigest()[:8]
 
 
+def _same_file(a: Path, b: Path) -> bool:
+    """a 和 b 是不是同一个文件（NTFS 这类大小写不敏感的盘上，改大小写时很有用）。"""
+    try:
+        return a.samefile(b)
+    except OSError:
+        return False
+
+
 def _unique_path(dest_dir: Path, name: str) -> Path:
     """目标重名时给个不冲突的名字：照片.jpg → 照片 (1).jpg → 照片 (2).jpg"""
     p = Path(name)
@@ -1564,6 +1575,275 @@ class Library:
             progress(total, total, "")
         return {"moved": len(moved), "renamed": renamed, "skipped": skipped,
                 "errors": errors, "dest": str(destp), "total": total}
+
+    # -- 重命名（本机执行；RAW 配对与 sidecar 一起改，缩略图缓存跟着搬） ------
+    @staticmethod
+    def _check_new_stem(stem: str) -> str:
+        """检查新文件名（不含扩展名）能不能用：返回错误说明，没问题返回空串。"""
+        if not stem or not stem.strip():
+            return "名字不能是空的"
+        if stem in (".", ".."):
+            return "名字不能是 . 或 .."
+        if stem != stem.strip():
+            return "名字首尾不能有空格"
+        # 素材盘多是 NTFS：这些字符要么非法、要么跨平台会出问题，统一拦掉
+        bad = sorted({c for c in stem if c in '/\\:*?"<>|' or ord(c) < 32})
+        if bad:
+            return "名字里不能有这些字符：%s" % " ".join(bad)
+        if stem.endswith("."):
+            return "名字不能以 . 结尾（Windows 上存不下来）"
+        if stem.startswith("."):
+            return "名字不能以 . 开头（会被当成隐藏文件跳过）"
+        if len(stem.encode("utf-8")) > 200:
+            return "名字太长了，换个短点的"
+        return ""
+
+    def _group_files(self, it: dict) -> list:
+        """改名要一起动的文件：条目本身 + 配对的另一张（RAW↔JPEG）+ 同名 sidecar。"""
+        paths: list[Path] = []
+        seen: set = set()
+
+        def add(p) -> None:
+            if p and str(p) not in seen:
+                seen.add(str(p))
+                paths.append(Path(p))
+
+        add(it.get("path"))
+        with self.lock:
+            twin = self.items.get(it["paired_with"]) if it.get("paired_with") else None
+        if twin:
+            add(twin.get("path"))
+        if (it.get("raw") or {}).get("path"):
+            add(it["raw"]["path"])
+        src = Path(it["path"])                    # sidecar 不进索引，只能自己看目录
+        try:
+            for sib in src.parent.iterdir():
+                if sib.is_file() and sib.stem == src.stem \
+                        and sib.suffix.lower() in SIDECAR_EXTS:
+                    add(sib)
+        except OSError:
+            pass
+        return paths
+
+    def rename_plan(self, ids: list[str], spec: dict) -> list[dict]:
+        """算出每个条目改名后叫什么（只看索引，不落盘）。预览和真正执行都用它。
+
+        spec 的字段都作用在**主文件名**上，扩展名不动：
+          name            直接给新名字（单张改名）
+          find / replace  查找替换
+          prefix / suffix 加前缀 / 后缀
+          seq,start,digits,seq_sep   连续编号（如 001、002）
+        """
+        name = str(spec.get("name") or "")
+        find = str(spec.get("find") or "")
+        repl = str(spec.get("replace") or "")
+        prefix = str(spec.get("prefix") or "")
+        suffix = str(spec.get("suffix") or "")
+        use_seq = bool(spec.get("seq"))
+        try:
+            start = int(spec.get("start") or 1)
+        except (TypeError, ValueError):
+            start = 1
+        try:
+            digits = max(1, min(6, int(spec.get("digits") or 3)))
+        except (TypeError, ValueError):
+            digits = 3
+        sep = str(spec.get("seq_sep") or "_")
+
+        plan: list[dict] = []
+        n = 0
+        for iid in ids:
+            with self.lock:
+                it = dict(self.items.get(iid) or {}) or None
+            if not it:
+                plan.append({"id": iid, "status": "error", "detail": "条目不在了（可能刚被移动/删掉）"})
+                continue
+            if it.get("remote"):
+                plan.append({"id": iid, "old": it.get("name", ""), "status": "error",
+                             "detail": "远程服务器上的文件不能改名（先下载到本机）"})
+                continue
+            n += 1
+            src = Path(it["path"])
+            stem, ext = src.stem, src.suffix
+            if name:
+                new_stem = name
+            elif use_seq:
+                new_stem = "%s%0*d%s" % (prefix, digits, start + n - 1, suffix)
+            else:
+                new_stem = stem.replace(find, repl) if find else stem
+                new_stem = "%s%s%s" % (prefix, new_stem, suffix)
+            err = self._check_new_stem(new_stem)
+            if not err and new_stem == stem:
+                err = "名字没变"
+            plan.append({"id": iid, "path": str(src), "old": src.name, "ext": ext,
+                         "new_stem": new_stem, "new_name": new_stem + ext,
+                         "status": "error" if err else "ok", "detail": err})
+        return plan
+
+    def rename_items(self, ids: list[str], spec: dict, on_conflict: str = "rename",
+                     dry_run: bool = False, progress=None) -> dict:
+        """按 spec 改名（本机执行）。dry_run=True 时只算名字和冲突，一个字都不落盘。"""
+        plan = self.rename_plan(ids, spec)
+        used: set = set()          # 这一批已经占掉的目标路径
+        srcs: set = set()          # 这一批会挪走的源文件（判断冲突时要排除它们，才能"互换名字"）
+
+        for row in plan:
+            if row.get("status") == "ok":
+                with self.lock:
+                    it = dict(self.items.get(row["id"]) or {})
+                row["_group"] = self._group_files(it)
+                srcs.update(str(f) for f in row["_group"])
+
+        # ---- 先给整组算好目标名；任何一条算不出来，这一条就整组不动 ----
+        for row in plan:
+            if row.get("status") != "ok":
+                continue
+            moves: list = []
+            problem = ""
+            for f in row["_group"]:
+                t = f.parent / (row["new_stem"] + f.suffix)
+                while str(t) in used and not _same_file(t, f):
+                    t = _unique_path(f.parent, t.name)
+                clash = t.exists() and not _same_file(t, f) and str(t) not in srcs
+                if clash:
+                    if on_conflict == "skip":
+                        problem = "目标已有同名文件：%s" % t.name
+                        break
+                    if on_conflict == "overwrite":
+                        if t.is_dir():
+                            problem = "%s 是个文件夹，没动" % t.name
+                            break
+                    else:
+                        t = _unique_path(f.parent, t.name)
+                used.add(str(t))
+                moves.append((f, t))
+            row["_moves"] = moves
+            if problem:
+                row["status"] = "skipped"
+                row["detail"] = problem
+            else:
+                row["conflict"] = any(str(t) != str(f) and t.exists() and str(t) not in srcs
+                                      for f, t in moves)
+
+        done_rows = [r for r in plan if r.get("_moves")]
+        if dry_run:
+            for row in plan:
+                row.pop("_group", None)
+            return {"dry_run": True, "total": len(plan),
+                    "ok_count": sum(1 for r in plan if r.get("status") == "ok"),
+                    "skipped": sum(1 for r in plan if r.get("status") == "skipped"),
+                    "failed": sum(1 for r in plan if r.get("status") == "error"),
+                    "conflicts": sum(1 for r in plan if r.get("conflict")),
+                    "results": [{k: v for k, v in r.items() if not k.startswith("_")}
+                                for r in plan]}
+
+        # ---- 落盘：两阶段（先临时名再目标名），这样"互换名字"和大小写改动都不会撞 ----
+        ok = skipped = failed = 0
+        total = len(done_rows)
+        temp: list = []            # (临时路径, 目标路径)
+        for i, row in enumerate(done_rows):
+            if progress:
+                progress(i, total, row["old"])
+            pair_list = []
+            try:
+                for j, (f, t) in enumerate(row["_moves"]):
+                    if str(f) == str(t):
+                        continue
+                    tmp = f.parent / (".mb-rename-%d-%d-%s" % (os.getpid(), j, f.name))
+                    os.rename(str(f), str(tmp))
+                    temp.append((tmp, t, f))
+                    pair_list.append((f, t))
+            except Exception as e:
+                for tmp, t, f in reversed(temp):        # 这一条回滚
+                    try:
+                        os.rename(str(tmp), str(f))
+                    except OSError:
+                        pass
+                temp = [x for x in temp if x[2] not in [p[0] for p in pair_list]]
+                row["status"] = "error"
+                row["detail"] = str(e)
+                failed += 1
+                continue
+            for f, t in pair_list:
+                pass
+            row["_pairs"] = pair_list
+
+        for row in done_rows:
+            if row.get("status") != "ok":
+                continue
+            try:
+                for tmp, t, f in [x for x in temp if x[2] in [p[0] for p in row.get("_pairs", [])]]:
+                    if t.exists() and not _same_file(t, tmp):
+                        if on_conflict == "overwrite":
+                            t.unlink()
+                        else:
+                            t = _unique_path(t.parent, t.name)
+                    os.rename(str(tmp), str(t))
+                    self._move_cache(f, t)
+                names = [t.name for _, t in row.get("_pairs", [])]
+                row["status"] = "done"
+                row["to"] = row["_pairs"][0][1].name if row.get("_pairs") else row["old"]
+                row["files"] = names or [row["old"]]
+                row["new_id"] = self._id_after(row["id"], row["to"])
+                ok += 1
+            except Exception as e:
+                row["status"] = "error"
+                row["detail"] = str(e)
+                failed += 1
+
+        skipped = sum(1 for r in plan if r.get("status") == "skipped")
+        failed += sum(1 for r in plan if r.get("status") == "error")
+        if progress:
+            progress(total, total, "")
+        if ok:
+            self.scan()                                  # 重建索引（几毫秒）
+        out = []
+        for r in plan:
+            r.pop("_group", None)
+            r.pop("_moves", None)
+            r.pop("_pairs", None)
+            out.append(r)
+        return {"dry_run": False, "ok_count": ok, "skipped": skipped, "failed": failed,
+                "total": len(plan), "results": out}
+
+    def _id_after(self, old_id: str, new_name: str) -> str:
+        """改名后的新条目 id（拿旧 id 换掉最后一段文件名；拿不到就原样返回）。"""
+        if not old_id or not new_name:
+            return old_id
+        head, sep, _ = old_id.rpartition("/")
+        return (head + sep + new_name) if sep else new_name
+
+    def _move_cache(self, old: Path, new: Path) -> None:
+        """文件改名后把缩略图和元信息缓存也挪过去（省得重新生成一遍）。"""
+        with self.lock:
+            old_it = next((dict(v) for v in self.items.values()
+                           if v.get("path") == str(old)), None)
+        if not old_it:
+            return
+        root_i = old_it.get("root", 0)
+        try:
+            old_rel = str(old.relative_to(self.roots[root_i]))
+            new_rel = str(new.relative_to(self.roots[root_i]))
+        except (ValueError, IndexError):
+            return
+        old_id = self.item_id(root_i, old_rel)
+        new_id = self.item_id(root_i, new_rel)
+        if old_id == new_id:
+            return
+        # 缩略图 key 只跟 id/大小/修改时间有关，而改名不动这两样 → 缓存文件直接搬
+        fake = dict(old_it, id=new_id, path=str(new), rel=new_rel, name=new.name)
+        old_thumb = self.thumb_path_for(self.thumb_key(old_it))
+        new_thumb = self.thumb_path_for(self.thumb_key(fake))
+        try:
+            if old_thumb.exists():
+                new_thumb.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(str(old_thumb), str(new_thumb))
+        except OSError:
+            pass
+        with self.lock:
+            meta = self._meta_cache.pop(old_id, None)
+            if meta is not None:
+                self._meta_cache[new_id] = meta
 
     # -- 元信息缓存（缩略图/时长跨次启动复用） -------------------------------
     def _load_meta_cache(self) -> None:
@@ -2771,6 +3051,7 @@ class Handler(BaseHTTPRequestHandler):
         "/api/move",           # 移动文件（一定在本机执行）
         "/api/mkdir",          # 在素材目录里新建文件夹
         "/api/decode",         # 批量解码 RAW（会在素材目录里写文件）
+        "/api/rename",         # 重命名（改的是素材目录里的文件名）
     }
     REMOTE_GUI_MSG = ("局域网客户端不能做这个：它会在服务器那台电脑上弹出 VLC / 看图工具，"
                       "或者改动素材目录里的文件。想看请在浏览器里播放，想存下来请用「下载」"
@@ -2885,6 +3166,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._api_browse(qs, body)
             elif path == "/api/move":
                 self._api_move(body)
+            elif path == "/api/rename":
+                self._api_rename(body)
             elif path == "/api/mkdir":
                 self._api_mkdir(body)
             elif path == "/api/decode":
@@ -3776,6 +4059,68 @@ class Handler(BaseHTTPRequestHandler):
             return self._err("新建失败：%s" % e)
         self._json({"ok": True, "path": str(newp), "name": name,
                     "message": "已新建文件夹 %s" % name})
+
+    def _api_rename(self, body) -> None:
+        """重命名（本机执行）。RAW 配对与 .xmp/.dop 这类 sidecar 会跟着一起改。
+
+        单张：{"id": "...", "name": "新名字"}
+        批量：{"ids": [...], "find": …, "replace": …, "prefix": …, "suffix": …,
+               "seq": true, "start": 1, "digits": 3}
+        预览：加 "dry_run": true —— 只算新旧名字和冲突，一个字都不落盘。
+        """
+        ids = [str(x) for x in (body.get("ids") or ([body["id"]] if body.get("id") else []))]
+        ids = [i for i in ids if i]
+        if not ids:
+            return self._err("先选一个（或几个）文件再改名")
+        spec = {k: body.get(k) for k in
+                ("name", "find", "replace", "prefix", "suffix",
+                 "seq", "start", "digits", "seq_sep")}
+        if not any(v not in (None, "") for v in spec.values()):
+            return self._err("没有给出新的文件名规则")
+        dry = bool(body.get("dry_run"))
+        on_conflict = str(body.get("on_conflict") or "rename").lower()
+        if on_conflict not in ("rename", "skip", "overwrite"):
+            on_conflict = "rename"
+        try:
+            res = APP.lib.rename_items(ids, spec, on_conflict=on_conflict, dry_run=dry)
+        except Exception as e:
+            return self._err("改名失败：%s" % e)
+
+        rows = res.get("results") or []
+        if dry:
+            conflicts = [r for r in rows if r.get("conflict")]
+            bad = [r for r in rows if r.get("status") == "error"]
+            return self._json({"ok": True, "dry_run": True, "results": rows,
+                               "ok_count": res["ok_count"], "skipped": res["skipped"],
+                               "failed": res["failed"], "total": res["total"],
+                               "conflicts": len(conflicts),
+                               "message": "预览：%d 个会改名%s%s"
+                                          % (res["ok_count"],
+                                             "，%d 个目标重名会另行处理" % len(conflicts) if conflicts else "",
+                                             "，%d 个不能改" % len(bad) if bad else "")})
+
+        ok = res["ok_count"]
+        skipped, failed = res["skipped"], res["failed"]
+        parts = []
+        if ok:
+            names = [r.get("to") or r.get("old") for r in rows if r.get("status") == "done"]
+            if len(names) == 1:
+                parts.append("已改名为 %s" % names[0])
+            else:
+                parts.append("已改名 %d 个" % ok)
+        if skipped:
+            parts.append("跳过 %d 个（目标重名）" % skipped)
+        if failed:
+            first = next((r for r in rows if r.get("status") == "error"), None)
+            parts.append("失败 %d 个%s" % (failed, "：" + str(first.get("detail")) if first else ""))
+        msg = "；".join(parts) or "没有需要改的"
+        new_id = next((r.get("new_id") for r in rows if r.get("status") == "done"), None)
+        self._json({"ok": True, "dry_run": False, "results": rows, "message": msg,
+                    "ok_count": ok, "skipped": skipped, "failed": failed,
+                    "total": res["total"], "new_id": new_id,
+                    "renamed": [{"from": r.get("old"), "to": r.get("to"),
+                                 "files": r.get("files")} for r in rows
+                                if r.get("status") == "done"]})
 
     def _api_move(self, body) -> None:
         """把选中的文件移到某个文件夹（本机执行），可选新建文件夹。"""

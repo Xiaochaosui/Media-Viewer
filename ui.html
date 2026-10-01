@@ -294,7 +294,6 @@
     .toast{font-size:13.5px;max-width:88vw}
     #toast{bottom:120px}
     .mbox{width:100%;max-height:94vh;border-radius:16px 16px 0 0}
-    #rootsModal,#moveModal{padding:0;align-items:flex-end}
     .mhead,.mbody,.mfoot{padding-left:14px;padding-right:14px}
     .mhead .x{font-size:20px;padding:6px 10px}
     .mbody{padding-bottom:calc(14px + env(safe-area-inset-bottom))}
@@ -312,7 +311,36 @@
     .rrow .rm{white-space:nowrap;padding:8px 12px}
     .mfoot .btn{padding:12px 16px}
     .flist{max-height:32vh}
+    /* 重命名：手机上按钮都按手指尺寸放大 */
+    .rnmodes button{min-height:42px;padding:9px 15px}
+    .rnname input{min-height:46px;font-size:16px}   /* 16px 以上 iOS 才不会自动放大输入框 */
+    .rnrow{padding:9px 10px}
   }
+
+  /* ：重命名弹窗（复用移动弹窗的外壳样式） */
+  #rnModal{position:fixed;inset:0;background:#000000a8;z-index:82;display:none;
+    align-items:center;justify-content:center;padding:24px}
+  #rnModal.on{display:flex}
+  .rnname{display:flex;gap:8px;align-items:center}
+  .rnname input{flex:1 1 auto;min-width:0;padding:9px 11px;background:var(--bg3);
+    border:1px solid var(--line);border-radius:8px;outline:none;font-size:14px;font-family:inherit}
+  .rnname input:focus{border-color:var(--accent)}
+  .rnname .tag{font-size:12.5px;padding:6px 9px}
+  .rnmodes{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+  .rnmodes button{background:var(--bg3);border:1px solid var(--line);color:var(--fg2);
+    border-radius:999px;padding:7px 14px;font-family:inherit;font-size:13px}
+  .rnmodes button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  .rnrow{display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--line);
+    font-size:12.5px}
+  .rnrow:last-child{border-bottom:0}
+  .rnrow .o{color:var(--fg3);flex:1 1 40%;min-width:0;overflow:hidden;text-overflow:ellipsis;
+    white-space:nowrap;direction:rtl;text-align:left}
+  .rnrow .a{color:var(--fg3)}
+  .rnrow .n{color:var(--fg);flex:1 1 40%;min-width:0;overflow:hidden;text-overflow:ellipsis;
+    white-space:nowrap}
+  .rnrow.bad .n{color:var(--err)}
+  .rnrow .st{font-size:11px;color:var(--err);white-space:nowrap}
+  .rnrow .st.warn{color:var(--warn)}
 
   /* 「移动到…」弹窗 */
   #moveModal{position:fixed;inset:0;background:#000000a8;z-index:82;display:none;
@@ -361,6 +389,16 @@
   kbd{background:var(--bg4);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;
       padding:1px 5px;font-size:11px;font-family:inherit;color:var(--fg2)}
   .hint{font-size:11.5px;color:var(--fg3);line-height:1.9}
+  /* ---------- 手机端：三个弹窗统一变「底部抽屉」 ----------
+     必须放在样式表最后：媒体查询写在前面时，后面的同名规则（同优先级）会把它盖掉。 */
+  @media (max-width: 760px) {
+    #rootsModal,#moveModal,#rnModal{padding:0;align-items:flex-end}
+    #rootsModal .mbox,#moveModal .mbox,#rnModal .mbox{width:100%;max-height:94vh;
+      border-radius:16px 16px 0 0}
+    .rnmodes button{min-height:42px;padding:9px 15px}
+    .rnname input{min-height:46px;font-size:16px}
+    .rnrow{padding:9px 10px}
+  }
 </style>
 </head>
 <body>
@@ -507,6 +545,75 @@
   </div>
 </div>
 
+<div id="rnModal">
+  <div class="mbox">
+    <div class="mhead">
+      <div><b>✏️ 重命名</b><span class="sub" id="rnCount"></span></div>
+      <button class="x" id="rnClose" title="关闭">✕</button>
+    </div>
+    <div class="mbody">
+      <div class="msec" id="rnSingle">
+        <h4>新名字</h4>
+        <div class="rnname">
+          <input id="rnName" placeholder="新的文件名（扩展名不用写）" spellcheck="false" autocomplete="off">
+          <span class="tag" id="rnExt">.JPG</span>
+        </div>
+        <div class="mhint" id="rnSingleHint"></div>
+      </div>
+
+      <div class="msec" id="rnBatch" style="display:none">
+        <h4>批量规则<span class="tag" style="margin-left:8px">只改主文件名，扩展名不动</span></h4>
+        <div class="rnmodes" id="rnModes">
+          <button data-rnmode="affix" class="on">＋ 加前缀 / 后缀</button>
+          <button data-rnmode="replace">🔁 查找替换</button>
+          <button data-rnmode="seq">🔢 连续编号</button>
+        </div>
+        <div class="madd" id="rnAffixBox">
+          <input id="rnPrefix" placeholder="前缀，例如 2026格聂_" autocomplete="off">
+          <input id="rnSuffix" placeholder="后缀，例如 _精选（可留空）" autocomplete="off">
+        </div>
+        <div class="madd" id="rnReplaceBox" style="display:none">
+          <input id="rnFind" placeholder="查找（区分大小写）" autocomplete="off">
+          <input id="rnRepl" placeholder="替换成（留空 = 删掉）" autocomplete="off">
+        </div>
+        <div class="madd" id="rnSeqBox" style="display:none">
+          <input id="rnSeqPrefix" placeholder="编号前的字，例如 格聂_" autocomplete="off">
+          <input id="rnStart" type="number" min="0" value="1" title="从几开始" style="max-width:110px">
+          <select id="rnDigits" title="编号位数">
+            <option value="2">2 位（01）</option>
+            <option value="3" selected>3 位（001）</option>
+            <option value="4">4 位（0001）</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="msec">
+        <h4>预览<span class="sub" id="rnPreviewCount"></span></h4>
+        <div class="flist" id="rnPreview"><div class="none">改一下上面的规则就能看到新名字</div></div>
+      </div>
+
+      <div class="msec">
+        <h4>如果新名字已经有人用了</h4>
+        <div class="conf">
+          <label><input type="radio" name="rnconf" value="rename" checked> 自动改名（加 (1)，推荐）</label>
+          <label><input type="radio" name="rnconf" value="skip"> 跳过不动</label>
+          <label><input type="radio" name="rnconf" value="overwrite"> 覆盖</label>
+        </div>
+        <div class="mhint">
+          改名在<b>这台电脑</b>上执行（局域网客户端用不了）。扩展名不动；
+          配对的 RAW（如 <code>.RAF</code>）和同名 <code>.xmp</code> 会一起改；
+          缩略图缓存跟着搬，不用重新生成。改名后列表会自动刷新。
+        </div>
+      </div>
+    </div>
+    <div class="mfoot">
+      <span class="hint" id="rnHint"></span>
+      <button class="btn" id="rnCancel">取消</button>
+      <button class="btn primary" id="rnGo">✏️ 改名</button>
+    </div>
+  </div>
+</div>
+
 <div id="rootsModal">
   <div class="mbox">
     <div class="mhead">
@@ -549,6 +656,7 @@
   <button class="btn" id="selView">🖼 查看原图</button>
   <button class="btn" id="selDecode" title="把选中的 RAW 解成全尺寸 JPEG（存到 RAW 同级目录）">🎞 解码RAW</button>
   <button class="btn" id="selMove">📦 移动</button>
+  <button class="btn" id="selRename">✏️ 重命名</button>
   <button class="btn" id="selDl">⬇ 下载</button>
   <button class="btn" id="selReveal">📁 定位</button>
   <button class="btn" id="selCopy">📋 复制路径</button>
@@ -589,7 +697,7 @@ function roBlock(what) {
 }
 function markRemoteUI() {
   // 远程一律只能浏览器内播放/下载：把这些按钮换掉或藏起来
-  for (const id of ["selPlay", "selView", "selMove", "selReveal", "selDecode", "rawDecodeAll"]) {
+  for (const id of ["selPlay", "selView", "selMove", "selRename", "selReveal", "selDecode", "rawDecodeAll"]) {
     const el = $(id);
     if (el) { el.style.display = "none"; }
   }
@@ -978,7 +1086,8 @@ function detailHTML(d) {
     : `<button class="btn" id="dreveal">📁 定位</button>
        <button class="btn" id="dcopy">📋 复制路径</button>
        <button class="btn" id="dthumb" title="重新抽取缩略图（可修正黑帧封面）">🔄 刷新缩略图</button>
-       <button class="btn" id="dmove">📦 移动到…</button>`;
+       <button class="btn" id="dmove">📦 移动到…</button>
+       <button class="btn" id="drename" title="重命名这个文件（RAW 配对与 .xmp 会一起改）">✏️ 重命名</button>`;
   return `
   <div class="dhead">
     <div class="t" title="${esc(d.name)}">${esc(d.name)}</div>
@@ -1000,7 +1109,7 @@ function detailHTML(d) {
     <h4>快捷键</h4>
     <div class="hint">
       <kbd>空格</kbd> 浏览器内预览 · <kbd>Enter</kbd> ${isRemote() ? "在浏览器中播放 / 查看" : "打开（视频→VLC，图片→看原图）"} ·
-      <kbd>←</kbd><kbd>→</kbd> 切换上一个/下一个 · <kbd>Ctrl</kbd>+<kbd>A</kbd> 全选 ·
+      <kbd>←</kbd><kbd>→</kbd> 切换上一个/下一个 · <kbd>F2</kbd> 重命名 · <kbd>Ctrl</kbd>+<kbd>A</kbd> 全选 ·
       <kbd>Esc</kbd> 关闭 · 双击卡片同样${isRemote() ? "在浏览器里打开" : "按类型打开"}
     </div>
   </div>`;
@@ -1023,6 +1132,10 @@ function bindDetail(d) {
   if ($i("cpDec")) $i("cpDec").onclick = () => copyText(d.raw_decoded.path, "解码结果路径已复制");
   if ($i("dreveal")) $i("dreveal").onclick = () => reveal(d.id);
   if ($i("dmove")) $i("dmove").onclick = () => openMove([d.id]);
+  if ($i("drename")) $i("drename").onclick = () => {
+    if (d.remote) return toast("远程服务器上的文件不能改名，先下载到本机再整理", "err", 4500);
+    openRename([d.id]);
+  };
   if ($i("dfetch")) $i("dfetch").onclick = () => openItems([d.id], "auto");
   if ($i("dnewtab")) $i("dnewtab").onclick = () => window.open(mediaURL(d.id), "_blank");
   if ($i("dbig")) $i("dbig").onclick = () => {
@@ -1765,8 +1878,166 @@ document.addEventListener("keydown", (e) => {
       }
       break;
     case "Home": if (S.items[0]) { selectOnly(S.items[0].id); openDetail(S.items[0].id); } break;
+    case "F2": {                            // 重命名：详情里那张，或者选中的那几个
+      e.preventDefault();
+      const ids = S.selected.size ? selectedIDs(true) : (S.active ? [S.active] : []);
+      if (ids.length) openRename(ids);
+      break;
+    }
+    case "Delete": break;                   // 留给以后（现在别误触）
   }
 });
+
+/* ------------------------------------------------------------ 重命名 */
+const RN = { ids: [], single: false, mode: "affix", busy: false, timer: null, plan: null };
+
+function openRename(ids) {
+  if (roBlock("重命名文件")) return;
+  const list = (ids || []).filter(Boolean);
+  if (!list.length) return toast("先选一个（或几个）文件再点「重命名」", "err");
+  const remote = list.filter(i => (itemOf(i) || {}).remote);
+  if (remote.length) return toast("选中的里面有远程服务器上的文件，改名只在本机素材上做", "err", 4500);
+  RN.ids = list;
+  RN.single = list.length === 1;
+  RN.busy = false;
+  RN.plan = null;
+  const first = itemOf(list[0]) || {};
+  const name = String(first.name || "");
+  const dot = name.lastIndexOf(".");
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : "";
+  $("rnCount").textContent = RN.single ? name : `已选 ${list.length} 项`;
+  $("rnSingle").style.display = RN.single ? "" : "none";
+  $("rnBatch").style.display = RN.single ? "none" : "";
+  $("rnName").value = RN.single ? stem : "";
+  $("rnExt").textContent = ext || "（无扩展名）";
+  $("rnExt").style.display = RN.single && ext ? "" : "none";
+  $("rnSingleHint").textContent = RN.single
+    ? "只改文件名，扩展名保持 " + (ext || "不变") + "。RAW 配对与同名 .xmp 会一起改。"
+    : "";
+  $("rnGo").textContent = RN.single ? "✏️ 改名" : `✏️ 改名（${list.length} 个）`;
+  $("rnGo").disabled = false;
+  $("rnClose").disabled = false;
+  $("rnModal").classList.add("on");
+  if (!RN.single) setRnMode(RN.mode || "affix");
+  rnPreview();
+  setTimeout(() => { if (RN.single) { $("rnName").focus(); $("rnName").select(); } }, 60);
+}
+function closeRename() {
+  if (RN.busy) return;
+  $("rnModal").classList.remove("on");
+  if (RN.timer) { clearTimeout(RN.timer); RN.timer = null; }
+}
+function setRnMode(mode) {
+  RN.mode = mode;
+  document.querySelectorAll("#rnModes button").forEach(b =>
+    b.classList.toggle("on", b.dataset.rnmode === mode));
+  $("rnAffixBox").style.display = mode === "affix" ? "" : "none";
+  $("rnReplaceBox").style.display = mode === "replace" ? "" : "none";
+  $("rnSeqBox").style.display = mode === "seq" ? "" : "none";
+  rnPreview();
+}
+function rnSpec() {
+  if (RN.single) {
+    const v = $("rnName").value.trim();
+    return v ? { name: v } : {};
+  }
+  if (RN.mode === "replace") {
+    const find = $("rnFind").value;
+    if (!find) return {};
+    return { find, replace: $("rnRepl").value };
+  }
+  if (RN.mode === "seq") {
+    return { seq: true, prefix: $("rnSeqPrefix").value, start: Number($("rnStart").value) || 1,
+             digits: Number($("rnDigits").value) || 3 };
+  }
+  const p = $("rnPrefix").value, sfx = $("rnSuffix").value;
+  return (p || sfx) ? { prefix: p, suffix: sfx } : {};
+}
+function rnConflict() {
+  return (document.querySelector('input[name="rnconf"]:checked') || {}).value || "rename";
+}
+async function rnPreview() {
+  if (RN.timer) { clearTimeout(RN.timer); RN.timer = null; }
+  const spec = rnSpec();
+  const box = $("rnPreview");
+  if (!Object.keys(spec).length) {
+    box.innerHTML = `<div class="none">${RN.single ? "输入新名字" : "填一下上面的规则"}，这里会显示改名前后的对照</div>`;
+    $("rnPreviewCount").textContent = "";
+    $("rnHint").textContent = "";
+    RN.plan = null;
+    return;
+  }
+  try {
+    const j = await post("/api/rename", { ids: RN.ids, ...spec, on_conflict: rnConflict(), dry_run: true });
+    RN.plan = j;
+    const rows = (j.results || []).slice(0, 300).map(r => {
+      const bad = r.status === "error";
+      const warn = !bad && r.status === "skipped";
+      const status = bad ? `<span class="st">${esc(r.detail || "不能改")}</span>`
+        : warn ? `<span class="st warn">同名，会跳过</span>`
+        : (r.conflict ? `<span class="st warn">目标已存在</span>` : "");
+      return `<div class="rnrow${bad ? " bad" : ""}">
+        <span class="o" title="${esc(r.old || "")}">${esc(r.old || r.id)}</span>
+        <span class="a">→</span>
+        <span class="n" title="${esc(r.new_name || "")}">${esc(r.new_name || "—")}</span>
+        ${status}</div>`;
+    });
+    box.innerHTML = rows.join("") || `<div class="none">没有可改的</div>`;
+    const will = j.ok_count || 0;
+    $("rnPreviewCount").textContent = `：${will} 个会改名`
+      + (j.skipped ? `，${j.skipped} 个跳过` : "")
+      + (j.failed ? `，${j.failed} 个不能改` : "")
+      + (j.total > 300 ? `（只列了前 300 条）` : "");
+    $("rnHint").textContent = will ? `将重命名 ${will} 个文件` : "现在没有可改名的";
+    $("rnGo").disabled = !will;
+  } catch (e) {
+    box.innerHTML = `<div class="none">预览失败：${esc(e.message)}</div>`;
+  }
+}
+function rnLater() {                       // 输入时抖一下再预览，别每敲一个字就请求
+  if (RN.timer) clearTimeout(RN.timer);
+  RN.timer = setTimeout(rnPreview, 220);
+}
+$("rnClose").onclick = closeRename;
+$("rnCancel").onclick = closeRename;
+$("rnModal").addEventListener("click", (e) => { if (e.target.id === "rnModal") closeRename(); });
+document.querySelectorAll("#rnModes button").forEach(b => {
+  b.onclick = () => setRnMode(b.dataset.rnmode);
+});
+["rnName", "rnPrefix", "rnSuffix", "rnFind", "rnRepl", "rnSeqPrefix", "rnStart", "rnDigits"]
+  .forEach(id => {
+    const el = $(id);
+    if (!el) return;
+    el.addEventListener("input", rnLater);
+    el.addEventListener("change", rnLater);
+    el.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); if (!$("rnGo").disabled) $("rnGo").click(); }
+    });
+  });
+document.querySelectorAll('input[name="rnconf"]').forEach(el => el.addEventListener("change", rnPreview));
+$("rnGo").onclick = async () => {
+  const spec = rnSpec();
+  if (!Object.keys(spec).length) return toast("先填一下新的文件名规则", "err");
+  RN.busy = true;
+  $("rnGo").disabled = true; $("rnClose").disabled = true;
+  const single = RN.single;
+  try {
+    const j = await post("/api/rename", { ids: RN.ids, ...spec, on_conflict: rnConflict() });
+    toast(j.message || "改好了", j.failed ? "err" : "ok", j.failed ? 6000 : 3200);
+    RN.busy = false;
+    closeRename();
+    S.selected.clear();
+    paintSelection();
+    await reloadSame();
+    if (single && j.new_id) openDetail(j.new_id);      // 详情跟着跟到新名字上
+  } catch (e) {
+    RN.busy = false;
+    $("rnGo").disabled = false; $("rnClose").disabled = false;
+    toast("改名失败：" + e.message, "err", 5000);
+  }
+};
+$("selRename").onclick = () => openRename(selectedIDs(true));
 
 /* --------------------------------------------------------------- 启动 */
 (function init() {
