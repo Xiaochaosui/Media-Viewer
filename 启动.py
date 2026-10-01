@@ -37,8 +37,8 @@ TOOL = HERE / "media_browser.py"
 # 不带目录启动时去哪儿找素材：按顺序取**真实存在**的那几个 ——
 # 外接盘/移动盘没挂上就自动跳过，不会像写死一个路径那样直接报「目录不存在」。
 DEFAULT_DIRS = {
-    "linux": ["/mnt/MEDIA/个人生活", "/mnt/XCS_DATA/生活记录",
-              "/mnt/XCS_DATA/个人生活", str(Path.home() / "图片"), str(Path.home() / "Pictures")],
+    "linux": ["/mnt/MEDIA/个人生活", "/mnt/MEDIA",
+              "/mnt/XCS_DATA/生活记录", str(Path.home() / "图片"), str(Path.home() / "Pictures")],
     "darwin": [str(Path.home() / "Pictures"), str(Path.home() / "Movies")],
     "win": [str(Path.home() / "Pictures"), str(Path.home() / "Videos")],
 }
@@ -66,8 +66,14 @@ def default_dirs(limit: int = 3) -> list:
 
     for d in cands:
         p = Path(d).expanduser()
-        if str(p) not in found and usable(p):
-            found.append(str(p))
+        sp = str(p).rstrip("/")
+        # 已经选过它、或者跟已选中的目录有上下层关系 → 跳过，
+        # 免得同一个文件在墙上出现两遍（/mnt/MEDIA 和 /mnt/MEDIA/个人生活 就是这种）
+        if sp in found or any(sp.startswith(f + "/") for f in found) \
+                or any(f.startswith(sp + "/") for f in found):
+            continue
+        if usable(p):
+            found.append(sp)
         if len(found) >= limit:
             break
     return found or [str(Path.home())]
@@ -276,7 +282,7 @@ def main(argv: list[str]) -> int:
     if missing:
         say("目录不存在：%s" % "、".join(missing))
         say("（现在会自动找这几个：%s）" % "、".join(default_dirs()))
-        say(" 要浏览别的地方就带上路径，例如：./启动.sh /mnt/XCS_DATA/某目录")
+        say(" 要浏览别的地方就带上路径，例如：./启动.sh /mnt/XCS_DATA/某目录 ~/图片")
         return 1
 
     ips = lan_ips()

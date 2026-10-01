@@ -1,6 +1,6 @@
 {
-  "roots": ["/mnt/XCS_DATA/生活记录"],
-  "extra_roots": ["/mnt/XCS_DATA/生活记录"],
+  "roots": ["/mnt/MEDIA/个人生活"],
+  "extra_roots": ["/home/xcs/图片"],
   "remote_roots": [],
   "port": 8777,
   "lan": true,

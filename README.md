@@ -10,7 +10,7 @@
 点开就能看详情（尺寸 / 时长 / 编码 / EXIF / 路径）；
 **视频一键交给本机 VLC 播放，图片交给本机看图工具看原图（有 RAW 就直接解 RAW 全尺寸）**。
 
-- 工程目录：`/mnt/XCS_DATA/个人项目/媒体浏览器/`
+- 工程目录：`/data/Projects/媒体浏览器/`
 - 桌面图标：`~/桌面/媒体浏览器.desktop` —— **双击一键启动**（应用菜单里也注册了一份）
 - 当前素材量下（96 个视频 + 78 张照片 + 78 个 RAW），首次扫描约 0.2 秒，缩略图 174 张全部生成约 25 秒（之后秒开）
 - 界面里可以直接**加别的文件夹**（系统选择框或手输路径），加了会记住，下次启动还在
@@ -69,7 +69,7 @@
 命令行方式：
 
 ```bash
-cd /mnt/XCS_DATA/个人项目/媒体浏览器
+cd /data/Projects/媒体浏览器
 ./启动.sh                     # 不带参数：自动挑存在且有内容的素材目录（见下面的说明）
 ./启动.sh ~/Pictures          # 浏览指定目录
 ./启动.sh ~/A ~/B             # 浏览多个目录
@@ -79,7 +79,7 @@ MEDIA_BROWSER_LAN=1 ./启动.sh # 同上，用环境变量写法
 ```
 
 **不带参数时会自动挑目录**（`启动.py` 里的候选表，只取**存在且里面有东西**的）：
-Linux 依次看 `/mnt/MEDIA/个人生活` → `/mnt/XCS_DATA/生活记录` → `/mnt/XCS_DATA/个人生活` → `~/图片`，最多 3 个；
+Linux 依次看 `/mnt/MEDIA/个人生活` → `/mnt/MEDIA` → `/mnt/XCS_DATA/生活记录` → `~/图片`，最多 3 个；
 一个都没有才退到家目录。外接盘没挂上时不会报「目录不存在」，直接跳过 —— 想让它出现就先挂上盘，
 或者在界面里「📚 目录」加一次（会记住）。
 
@@ -92,7 +92,7 @@ Linux 依次看 `/mnt/MEDIA/个人生活` → `/mnt/XCS_DATA/生活记录` → `
 也可以双击工具目录里的 **`媒体浏览器.desktop`**（或在终端里）：
 
 ```bash
-python3 media_browser.py /mnt/XCS_DATA/生活记录
+python3 media_browser.py /mnt/MEDIA/个人生活
 ```
 
 启动后终端会打印地址（默认 <http://127.0.0.1:8777/>），浏览器会自动打开。
@@ -101,7 +101,7 @@ python3 media_browser.py /mnt/XCS_DATA/生活记录
 > 已经在运行时再点一次桌面图标，不会起第二个实例 —— 脚本会认出服务在跑，
 > 直接把浏览器窗口叫到前台。换端口用环境变量：`MEDIA_BROWSER_PORT=8899 ./启动.sh`。
 
-> 端口被占用时换个端口：`python3 media_browser.py /mnt/XCS_DATA/生活记录 -p 8899`
+> 端口被占用时换个端口：`python3 media_browser.py /mnt/MEDIA/个人生活 -p 8899`
 
 ### 同一套代码，三个平台怎么起
 
@@ -284,7 +284,7 @@ RAW 只是一堆原始感光数据，**怎么解是你说了算**，不同解法
 **根本不认识 X-T50**；系统又没装 pip。所以走的是「直接解压 PyPI 上的 manylinux 轮子」这条路：
 
 ```bash
-cd /mnt/XCS_DATA/个人项目/媒体浏览器
+cd /data/Projects/媒体浏览器
 ./安装RAW支持.sh          # 装到 1T 固态 /mnt/XCS_DATA/xcs-cache/pylibs（默认，约 71MB）
 ./安装RAW支持.sh --local  # 装到家目录 ~/.local/lib/media-browser/pylibs
 ./安装RAW支持.sh --check  # 看看现在能不能解
@@ -526,7 +526,7 @@ python3 media_browser.py [目录...] [选项]
 
 ```json
 {
-  "roots": ["/mnt/XCS_DATA/生活记录"],
+  "roots": ["/mnt/MEDIA/个人生活"],
   "port": 8777,
   "thumb_px": 480,
   "vlc_args": ["--one-instance"],
@@ -582,7 +582,7 @@ python3 media_browser.py [目录...] [选项]
 工程里带了一个 `媒体浏览器.desktop`，内容就是「在工程目录里跑 `启动.sh`，用终端打开」：
 
 ```bash
-cd /mnt/XCS_DATA/个人项目/媒体浏览器
+cd /data/Projects/媒体浏览器
 install -m 755 媒体浏览器.desktop ~/桌面/                          # 桌面图标
 install -m 755 媒体浏览器.desktop ~/.local/share/applications/      # 应用菜单里也来一份
 gio set ~/桌面/媒体浏览器.desktop metadata::trusted true            # GNOME 认这个标记才让直接双击
@@ -686,8 +686,8 @@ macOS 用系统自带的 `sips`/`qlmanage`/`mdls`，Windows 用 PowerShell + .NE
 
 ```json
 {
-  "roots": ["/mnt/XCS_DATA/生活记录"],
-  "extra_roots": ["/home/xcs/图片", "/mnt/XCS_DATA/照片"],
+  "roots": ["/mnt/MEDIA/个人生活"],
+  "extra_roots": ["/home/xcs/图片"],
   "port": 8777,
   "vlc_args": ["--one-instance"]
 }
@@ -706,7 +706,7 @@ macOS 用系统自带的 `sips`/`qlmanage`/`mdls`，Windows 用 PowerShell + .NE
 - `config.json` 里有本机路径和局域网口令，**已排除在仓库外**（`.gitignore`）；
   要一份能直接抄的模板看 [config.example.json](config.example.json)
 - 文档和界面提示里出现的 IP 一律写成 `192.168.x.x` 这种占位形式（**真实内网 IP 不外露**），
-  照抄时换成你自己的地址；文档里的 `/mnt/XCS_DATA/生活记录`、`/照片` 这类路径也只是例子，同理替换
+  照抄时换成你自己的地址；文档里的 `/mnt/MEDIA/个人生活`、`/照片` 这类路径也只是例子，同理替换
 - 第三方工具各按各的许可：ffmpeg（LGPL/GPL）、VLC（GPL）、Pillow（HPND）、rawpy/libraw（LGPL/CDDL）
   —— 本工具只是调用它们，不打包、不分发
 
