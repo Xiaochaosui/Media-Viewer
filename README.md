@@ -678,8 +678,14 @@ cd /Users/xiaochaosui/xcs/projects/Media-Viewer
 | 做法 | 说明 |
 | --- | --- |
 | **先拷到 Mac 自己的盘再整理**（推荐） | 内部磁盘是 APFS，随便改。拷到 `~/Pictures` 或任意本机文件夹，再用「📦 移动到…」分类 |
-| 装 NTFS 写入驱动 | Paragon NTFS / Tuxera NTFS（付费，最稳）；Mounty（免费，走系统实验性写入，有丢数据的风险）；Apple Silicon 上 macFUSE + ntfs-3g 要降安全等级，比较折腾 |
+| **装 NTFS 写入驱动** | macOS 15 / Apple Silicon 之后只剩付费的靠谱：[Paragon Microsoft NTFS for Mac](https://www.paragon-software.com/us/home/ntfs-mac/)（10 天免费试用，官方写明支持 macOS 27 Golden Gate + M1~M4）、[Tuxera Microsoft NTFS for Mac](https://ntfsformac.tuxera.com/)（同样支持 macOS 27）。装完重启一次，盘就以读写方式挂载了，本工具的 🔒 会自己消失（可写性是每次实时判断的，不用改配置） |
 | 把盘重格成 exFAT / APFS | 能读能写，但**会清空盘上数据**，有备份再考虑 |
+
+> **别再走的两条老路**：① 「Mounty for NTFS」靠的是系统自带的 `mount_ntfs`，
+> 新 macOS 上这个命令**已经被删掉了**（现在 NTFS 走 FSKit），Mounty 在 Ventura 及以后就失效，
+> 社区还有写坏数据的案例；② macFUSE + ntfs-3g 要先把 Apple Silicon 的启动安全性降成
+> "降低安全性"才能装内核扩展，而且这套在新系统上已经跑不通了。
+> 另外：**开写入之前先去 Windows 上 `chkdsk X: /f` 一下**（NTFS 带"脏"标志时让第三方驱动写，容易出事）。
 
 什么都不装也能用：把这种盘当"只读素材库"，浏览、搜索、浏览器里看、批量下载到本机都不需要写权限。
 
