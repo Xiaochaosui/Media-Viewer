@@ -444,11 +444,11 @@
   </label>
   <button class="btn" id="rawDecodeAll" title="把当前筛选里有 RAW 的照片全部解成全尺寸 JPEG；解出来的图存在 RAW 同级目录的「RAW解码」文件夹里">🎞 全部解码</button>
 
-  <label class="chk desk" title="用 VLC 播放时自动全屏">
+  <label class="chk desk" id="fsWrap" title="用 VLC 播放时自动全屏（VLC 专属，别的播放器忽略）">
     <input type="checkbox" id="fsChk" checked> 全屏
   </label>
 
-  <label class="chk desk" title="不新开窗口，直接在已经打开的 VLC 里切换文件（--one-instance）">
+  <label class="chk desk" id="oneWrap" title="不新开窗口，直接在已经打开的 VLC 里切换文件（--one-instance，VLC 专属）">
     <input type="checkbox" id="oneChk"> 复用窗口
   </label>
 
@@ -672,7 +672,7 @@ const S = {
   raw: false, size: 190, root: "",
   loading: false, done: false,
   cursor: -1, selected: new Set(), active: null,
-  stats: null, metaStamp: -1, viewer: "",
+  stats: null, metaStamp: -1, viewer: "", videoPlayer: "",
   version: null, versionSeen: false, polling: false, scanNote: "",
   rawMode: "", rawText: "", rawPreferred: true,
   roots: [], multi: false, suggestions: [], cfgPath: "",
@@ -973,7 +973,8 @@ function paintSelection() {
   const kind = (id) => (S.items.find(x => x.id === id) || {}).kind || "";
   const hasImg = ids.some(i => kind(i) !== "video");
   const rawish = hasImg && preferRaw() && ids.some(i => hasRAW(i));
-  $("selView").textContent = rawish ? "🖼 看 RAW 原图" : (hasImg ? "🖼 查看原图" : "▶ 用 VLC 播放");
+  $("selView").textContent = rawish ? "🖼 看 RAW 原图"
+    : (hasImg ? "🖼 查看原图" : `▶ 用 ${vpName()} 播放`);
   $("selView").dataset.mode = rawish ? "raw" : (hasImg ? "viewer" : "vlc");
   $("selView").disabled = n === 0;
 }
@@ -1013,7 +1014,7 @@ function detailHTML(d) {
   if (isVideo) {
     prev = `<div class="dprev" id="dprev">
       <img src="${poster}" alt="">
-      <div class="bigplay" id="bigplay" title="用 VLC 播放"><span>▶</span></div>
+      <div class="bigplay" id="bigplay" title="用 ${vpName()} 播放"><span>▶</span></div>
     </div>`;
   } else if (d.kind === "raw" && !d.paired_with) {
     prev = `<div class="dprev" id="dprev"><img src="${poster}" alt=""></div>`;
@@ -1075,11 +1076,11 @@ function detailHTML(d) {
          <button class="btn wide" id="dnewtab">⧉ 新标签页打开原图</button>`;
   } else {
     act = isVideo
-      ? `<button class="btn primary wide" id="dplay">▶ 用 VLC 播放</button>
+      ? `<button class="btn primary wide" id="dplay">▶ 用 ${vpName()} 播放</button>
          <button class="btn" id="dinline">🖥 浏览器内预览</button>`
       : `${rawBtn}
          <button class="btn ${d.has_raw ? "" : "primary"} wide" id="dview">🖼 ${d.has_raw ? "看 JPG" : "查看原图"}${viewerTag}</button>
-         <button class="btn" id="dplay">▶ 用 VLC 打开</button>`;
+         <button class="btn" id="dplay">▶ 用 ${vpName()} 打开</button>`;
   }
   const localBtns = (isRemote() || isRemoteItem)
     ? `<button class="btn" id="dcopy">📋 复制路径</button>`
@@ -1108,7 +1109,7 @@ function detailHTML(d) {
     ${exif.length ? `<h4>拍摄参数 (EXIF)</h4><dl class="kv">${exif.join("")}</dl>` : ""}
     <h4>快捷键</h4>
     <div class="hint">
-      <kbd>空格</kbd> 浏览器内预览 · <kbd>Enter</kbd> ${isRemote() ? "在浏览器中播放 / 查看" : "打开（视频→VLC，图片→看原图）"} ·
+      <kbd>空格</kbd> 浏览器内预览 · <kbd>Enter</kbd> ${isRemote() ? "在浏览器中播放 / 查看" : `打开（视频→${vpName()}，图片→看原图）`} ·
       <kbd>←</kbd><kbd>→</kbd> 切换上一个/下一个 · <kbd>F2</kbd> 重命名 · <kbd>Ctrl</kbd>+<kbd>A</kbd> 全选 ·
       <kbd>Esc</kbd> 关闭 · 双击卡片同样${isRemote() ? "在浏览器里打开" : "按类型打开"}
     </div>
@@ -1204,6 +1205,9 @@ function step(dir) {
   selectOnly(n.id); openDetail(n.id);
 }
 
+/* 这台机器实际会用哪个播放器打开视频（VLC / QuickTime Player / 系统默认播放器） */
+const vpName = () => S.videoPlayer || "播放器";
+
 /* ------------------------------------------------------------- 动作 */
 /* target: "auto" 按类型分流（视频→VLC，图片→本机看图工具看原图）
            "vlc" 全部交给 VLC    "viewer" 只用图片查看器 */
@@ -1215,12 +1219,12 @@ async function openItems(ids, target = "auto") {
           + `要一次拿多个，用「⬇ 下载」（会打包成 zip）。`, "err", 6000);
     return;
   }
-  if (roBlock(target === "vlc" ? "用 VLC 播放" : "打开原图")) return;
+  if (roBlock(target === "vlc" ? `用 ${vpName()} 播放` : "打开原图")) return;
   if (list.length > 12) {
     const rawLine = target === "raw"
       ? "· 每次最多解 6 张 RAW，每张要好几秒\n" : "";
     if (!confirm(`要一次打开 ${list.length} 个文件吗？\n\n` + rawLine +
-                 `· 视频会各自开一个 VLC 窗口（勾上「复用窗口」就只用一个）\n` +
+                 `· 视频会各自开一个 ${vpName()} 窗口（VLC 才支持勾上「复用窗口」只用一个）\n` +
                  `· 图片交给本机看图工具看原图`)) return;
   }
   const fullscreen = !!document.getElementById("fsChk")?.checked;
@@ -2053,6 +2057,10 @@ $("selRename").onclick = () => openRename(selectedIDs(true));
   fetch("/api/ping").then(r => r.json()).then(j => {
     $("ver").textContent = "v" + j.version;
     S.viewer = j.viewer || "";
+    S.videoPlayer = j.video_player || "";      // 这台机器双击视频会用谁（VLC / QuickTime Player…）
+    if (S.videoPlayer && S.videoPlayer !== "VLC") {   // 「全屏 / 复用窗口」是 VLC 专属开关
+      ["fsWrap", "oneWrap"].forEach(id => { const el = $(id); if (el) el.style.display = "none"; });
+    }
     S.remote = !!j.remote;
     S.readonly = !!j.readonly;
     if (S.remote) { markRemoteUI(); applyReadonly(); }

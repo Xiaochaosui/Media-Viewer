@@ -201,6 +201,55 @@ else:
 IMAGE_VIEWER = find_exe(*IMAGE_VIEWER_CANDIDATES)
 IMAGE_VIEWER_NAME = Path(IMAGE_VIEWER).name if IMAGE_VIEWER else ""
 
+# macOS 的「视频播放器」：装了 VLC / IINA 就优先用（什么格式都认），
+# 都没有就交给系统自带的 QuickTime Player，再兜底是系统默认程序（访达「显示简介」里设的打开方式）。
+# 目的：在没装 VLC 的 Mac 上双击视频也有东西弹出来，而不是甩一句「没装 VLC」。
+MAC_VIDEO_APPS = ("VLC", "IINA")                                 # 装了就用这两个
+MAC_QT_EXT = {".mov", ".mp4", ".m4v", ".qt", ".3gp", ".3g2"}     # QuickTime 认的格式
+MAC_APP_DIRS = (Path("/Applications"), Path("/System/Applications"),
+                Path("/System/Applications/Utilities"), Path.home() / "Applications")
+
+
+def mac_app_path(name: str) -> str:
+    """macOS 上找一个 .app：装了返回路径，没装返回空串。"""
+    if not IS_MAC:
+        return ""
+    for d in MAC_APP_DIRS:
+        p = d / (name + ".app")
+        try:
+            if p.exists():
+                return str(p)
+        except OSError:
+            pass
+    return ""
+
+
+def mac_video_player() -> str:
+    """macOS 上准备用哪个播放器（给人看的名字）；都没有就返回空串＝系统默认程序。"""
+    for name in MAC_VIDEO_APPS:
+        if mac_app_path(name):
+            return name
+    return "QuickTime Player" if mac_app_path("QuickTime Player") else ""
+
+
+def video_player_label() -> str:
+    """这台机器现在「双击视频」会用谁（网页顶栏 / --check 里显示用）。"""
+    if VLC:
+        return "VLC"
+    if IS_MAC:
+        return mac_video_player() or "系统默认播放器"
+    return ""
+
+
+def friendly_viewer_name(path: str | None) -> str:
+    """图片查看器给人看的名（macOS 的 open 其实就是「预览」，Windows 的 explorer 是「照片」）。"""
+    name = Path(path).name if path else ""
+    if IS_MAC and name == "open":
+        return "预览"
+    if IS_WIN and name.startswith("explorer"):
+        return "照片（Windows 图片查看器）"
+    return name
+
 try:  # Pillow 可选
     from PIL import Image, ImageOps  # type: ignore
     from PIL import ExifTags  # type: ignore
@@ -959,19 +1008,37 @@ class Launcher:
 
     # -- 具体动作 -----------------------------------------------------------
     def vlc_play(self, files: list[Path], extra: list[str] | None = None) -> tuple[bool, str]:
-        if not VLC:
-            hint = {
-                "macOS": "装一个 VLC（https://www.videolan.org/）或 brew install --cask vlc",
-                "Windows": "装一个 VLC（https://www.videolan.org/）",
-            }.get(PLATFORM_NAME, "sudo apt install vlc")
-            return False, "没有找到 VLC，请安装（%s）或在配置里指定 --vlc 路径" % hint
+        """打开视频（图片走 view_image）。名字沿用 vlc_play，装了什么就用什么。"""
         if not files:
             return False, "没有可播放的文件"
-        argv = [VLC] + list(extra or []) + [str(f) for f in files]
-        ok, msg = self.spawn(argv, wait=1.2)
-        if ok:
-            return True, "已用 VLC 打开 %d 个文件（%s）" % (len(files), self.describe())
-        return False, "VLC 启动失败：%s" % msg
+        if VLC:
+            argv = [VLC] + list(extra or []) + [str(f) for f in files]
+            ok, msg = self.spawn(argv, wait=1.2)
+            if ok:
+                return True, "已用 VLC 打开 %d 个文件（%s）" % (len(files), self.describe())
+            return False, "VLC 启动失败：%s" % msg
+        # 没装 VLC：macOS 交给系统播放器 —— QuickTime 认的格式直接用它，
+        # 别的（.mkv/.avi/.wmv…）交给系统默认程序（访达里设的打开方式，装了 IINA/VLC 自然就是它们）。
+        if IS_MAC and MAC_OPEN:
+            exts = {f.suffix.lower() for f in files}
+            tries: list[tuple[list[str], str]] = []
+            if exts <= MAC_QT_EXT and mac_app_path("QuickTime Player"):
+                tries.append(([MAC_OPEN, "-a", "QuickTime Player"], "QuickTime Player"))
+            tries.append(([MAC_OPEN], "系统默认播放器"))
+            errs: list[str] = []
+            for argv, shown in tries:
+                ok, msg = self.spawn(argv + [str(f) for f in files], wait=1.2)
+                if ok:
+                    note = "" if shown == "QuickTime Player" else \
+                        "（这个格式系统没默认程序，装 VLC / IINA 就能放）"
+                    return True, "已用 %s 打开 %d 个文件%s" % (shown, len(files), note)
+                errs.append("%s：%s" % (shown, msg))
+            return False, "打不开视频：%s" % "；".join(errs)
+        hint = {
+            "macOS": "装一个 VLC（https://www.videolan.org/）或 brew install --cask vlc",
+            "Windows": "装一个 VLC（https://www.videolan.org/）",
+        }.get(PLATFORM_NAME, "sudo apt install vlc")
+        return False, "没有找到 VLC，请安装（%s）或在配置里指定 --vlc 路径" % hint
 
     def view_image(self, files: list[Path], viewer: str | None = None) -> tuple[bool, str]:
         """用本机图片查看器打开原图（不是缩略图）。"""
@@ -981,19 +1048,23 @@ class Launcher:
         if not files:
             return False, "没有可查看的图片"
         name = Path(viewer).name.lower()
+        shown = Path(viewer).name
         if IS_MAC and name == "open":
-            # macOS：交给「预览」App，一次可以带多张
-            argv = [viewer, "-a", "Preview"] + [str(f) for f in files]
+            # macOS：图片交给系统自带的「预览」，一次可以带多张；
+            # 预览也打不开的（个别 RAW / 生僻格式）再退回系统默认看图程序。
+            shown = "预览"
+            ok, msg = self.spawn([viewer, "-a", "Preview"] + [str(f) for f in files], wait=1.2)
+            if not ok:
+                shown = "系统默认看图程序"
+                ok, msg = self.spawn([viewer] + [str(f) for f in files], wait=1.2)
         elif IS_WIN and name.startswith("explorer"):
-            argv = [viewer] + [str(f) for f in files]
             files = files[:1]
+            ok, msg = self.spawn([viewer] + [str(f) for f in files], wait=1.2)
         else:
             if name == "xdg-open":
                 files = files[:1]      # xdg-open 只接受一个文件
-            argv = [viewer] + [str(f) for f in files]
-        ok, msg = self.spawn(argv, wait=1.2)
+            ok, msg = self.spawn([viewer] + [str(f) for f in files], wait=1.2)
         if ok:
-            shown = "预览" if (IS_MAC and name == "open") else Path(viewer).name
             return True, "已打开 %d 张原图（%s）" % (len(files), shown)
         return False, "图片查看器启动失败：%s" % msg
 
@@ -2612,7 +2683,7 @@ class Library:
             if twin and twin in self.items:
                 d["play_target"] = self.items[twin]["path"]
                 d["view_target"] = self.items[twin]["path"]
-                d["play_note"] = ("RAW 原文件（%s）交给 VLC 多半打不开，「用 VLC 打开」"
+                d["play_note"] = ("RAW 原文件（%s）交给 VLC 多半打不开，「打开」"
                                   "会打开配套的 %s。" % (it["name"], Path(self.items[twin]["path"]).name))
         elif it.get("raw"):
             d["note"] = ("这条有配套 RAW：%s（%s）。"
@@ -2736,7 +2807,7 @@ class App:
         self.vlc_args = vlc_args or []
         self.playlist_limit = playlist_limit
         self.image_viewer = image_viewer or IMAGE_VIEWER
-        self.viewer_name = Path(self.image_viewer).name if self.image_viewer else ""
+        self.viewer_name = friendly_viewer_name(self.image_viewer)
         self.viewer_limit = viewer_limit
         self.ui_bytes: bytes | None = None
         self.ui_stamp: int | None = None
@@ -3186,6 +3257,7 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/ping":
                 self._json({"ok": True, "version": VERSION,
                             "viewer": APP.viewer_name, "vlc": bool(VLC),
+                            "video_player": video_player_label(),
                             "raw": APP.raw_mode(), "raw_text": APP.raw_mode_text(),
                             "raw_app": Path(APP.raw_app).name if APP.raw_app else "",
                             "remote": not self._client_local(),
@@ -3681,13 +3753,13 @@ class Handler(BaseHTTPRequestHandler):
         if target in ("auto", "vlc") and videos:
             ok, msg = APP.launcher.vlc_play(videos, extra)
             if ok:
-                parts.append("VLC 打开 %d 个视频" % len(videos))
+                parts.append("%s 打开 %d 个视频" % (video_player_label() or "播放器", len(videos)))
             else:
                 errors.append(msg)
         if target == "vlc" and images:
             ok, msg = APP.launcher.vlc_play(images, extra)
             if ok:
-                parts.append("VLC 打开 %d 张图片" % len(images))
+                parts.append("%s 打开 %d 张图片" % (video_player_label() or "播放器", len(images)))
             else:
                 errors.append(msg)
         elif target in ("auto", "viewer") and images:
@@ -3734,7 +3806,7 @@ class Handler(BaseHTTPRequestHandler):
         parts: list[str] = []
         if videos and target in ("auto", "vlc"):
             ok, msg = APP.launcher.vlc_play(videos, list(APP.vlc_args))
-            parts.append("VLC 打开 %d 个视频" % len(videos)) if ok else errors.append(msg)
+            parts.append("%s 打开 %d 个视频" % (video_player_label() or "播放器", len(videos))) if ok else errors.append(msg)
         if files and target in ("auto", "viewer", "raw"):
             use = files[:APP.viewer_limit]
             ok, msg = APP.launcher.view_image(use, APP.image_viewer)
@@ -4523,8 +4595,12 @@ def platform_report(port: int, host: str, cache_dir: Path, tool_dir: Path) -> in
     row("视频抽帧", FFMPEG, "多帧评分选最好的一帧")
     row("媒体信息", FFPROBE or (shutil.which("mdls") if IS_MAC else ""),
         "macOS 没 ffprobe 时用系统 mdls 读时长/尺寸/编码（macOS 自带，无需安装）")
-    row("视频播放", VLC, "本机用 VLC；别的机器只能在浏览器里转码看")
-    row("看图打开", IMAGE_VIEWER, "看原图用它，视频才走 VLC")
+    row("视频播放", VLC or (mac_video_player() if IS_MAC else ""),
+        "macOS 用系统自带播放器，装了 VLC / IINA 会优先用它们；别的机器只能在浏览器里转码看"
+        if IS_MAC else "本机用 VLC；别的机器只能在浏览器里转码看")
+    row("看图打开", IMAGE_VIEWER,
+        "macOS 图片交给系统自带的「预览」，视频交给上面的播放器"
+        if IS_MAC else "看原图用它，视频才走 VLC")
     row("文件定位", (MAC_OPEN if IS_MAC else (EXPLORER if IS_WIN else (GDBUS or XDG_OPEN))),
         "在文件管理器里定位文件")
     row("选文件夹", (OSASCRIPT if IS_MAC else (POWERSHELL if IS_WIN else _pick(["zenity", "kdialog"]))),

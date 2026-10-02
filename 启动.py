@@ -198,6 +198,14 @@ def tool_report() -> list[str]:
                       r"C:\Program Files\VideoLAN\VLC\vlc.exe"))
     if IS_MAC:
         vlc = vlc or ("/Applications/VLC.app" if Path("/Applications/VLC.app").exists() else "")
+        if not vlc:
+            # macOS 不用装也有得放：系统自带 QuickTime Player（.mp4/.mov 这类直接用它）；
+            # 装了 IINA / VLC 的话 media_browser 会优先用它们（什么格式都认）。
+            for nm in ("IINA", "QuickTime Player"):
+                if any((d / (nm + ".app")).exists()
+                       for d in (Path("/Applications"), Path("/System/Applications"))):
+                    vlc = nm + ("（系统自带）" if nm == "QuickTime Player" else "")
+                    break
     try:
         import PIL  # noqa: F401
         pil = "Pillow " + getattr(PIL, "__version__", "")
@@ -205,7 +213,7 @@ def tool_report() -> list[str]:
         pil = ""
     lines.append("  图片引擎 : %s" % (pil or "系统自带工具（macOS 用 sips，Windows 用 .NET）"))
     lines.append("  视频引擎 : %s" % (ff or "没装 —— 视频缩略图会用系统工具 / 直接留空"))
-    lines.append("  VLC      : %s" % (vlc or "没装"))
+    lines.append("  视频播放 : %s" % (vlc or "没装"))
     if not ff:
         hint = {
             "macOS": "brew install ffmpeg",
@@ -214,10 +222,12 @@ def tool_report() -> list[str]:
         lines.append("             （想要准确的视频时长/抽帧：%s）" % hint)
     if not vlc:
         hint = {
-            "macOS": "brew install --cask vlc",
+            "macOS": "brew install --cask iina（或 vlc）",
             "Windows": "winget install VideoLAN.VLC",
         }.get(PLATFORM, "sudo apt install vlc")
-        lines.append("             （要能用 VLC 播放：%s）" % hint)
+        lines.append("             （要能播放视频：%s）" % hint)
+    elif IS_MAC:
+        lines.append("             （QuickTime 不认的格式如 .mkv：brew install --cask iina）")
     if not pil:
         hint = {
             "macOS": "python3 -m pip install --user Pillow",

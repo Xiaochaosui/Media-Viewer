@@ -83,6 +83,15 @@ cd /Users/xiaochaosui/xcs/projects/Media-Viewer
 **工程搬家后重跑一遍，启动器里的路径就跟着更新了** —— 所以别手改 `.app` 里的脚本，改这个构建脚本。
 macOS 的日志在 `~/Library/Logs/media-browser/启动.log`。
 
+macOS 上「打开原图 / 播放」都指向系统自带的 App，不用额外装东西：
+
+| 点的是什么 | macOS 上会弹出谁 | 想换的话 |
+| --- | --- | --- |
+| 视频（`.mp4`/`.mov`/`.m4v`…） | **QuickTime Player**（系统自带） | 装 IINA / VLC 就自动优先用它们（什么格式都认，`.mkv` 这类必须装一个） |
+| 视频（`.mkv`/`.avi`/`.wmv`…） | 系统默认程序（访达里「显示简介 → 打开方式」设的那个） | 同上；没装播放器 macOS 会提示你挑一个 |
+| 图片原图 | **「预览」**（Preview） | `--image-viewer /path/to/app` 换别的看图程序 |
+| 定位文件 | 访达（`open -R`） | —— |
+
 命令行方式：
 
 ```bash
@@ -127,7 +136,7 @@ python3 media_browser.py /mnt/MEDIA/个人生活
 | 平台 | 双击这个 | 等价的命令行 | 说明 |
 | --- | --- | --- | --- |
 | Linux | 桌面「媒体浏览器」图标 | `./启动.sh` | zenity 选文件夹、`gio` 定位、VLC 播放 |
-| macOS | 桌面 / 程序坞「媒体浏览器」图标（`/Applications/媒体浏览器.app`，或 `启动.command`） | `./启动.sh` | 用系统 `sips`/`qlmanage` 出缩略图、`mdls` 读时长、`open` 看图/定位 |
+| macOS | 桌面 / 程序坞「媒体浏览器」图标（`/Applications/媒体浏览器.app`，或 `启动.command`） | `./启动.sh` | `sips`/`qlmanage` 出缩略图、`mdls` 读时长；**视频 → QuickTime Player（装了 VLC/IINA 优先），图片 → 「预览」**，定位走访达 |
 | Windows | `启动.bat` | `启动.bat` 或 `py -3 启动.py` | PowerShell + .NET 出缩略图、资源管理器定位、VLC 播放 |
 
 三者其实是同一个 `启动.py`（跨平台启动器），它只做几件事：找到 3.8 以上的 Python、
@@ -158,7 +167,7 @@ python3 media_browser.py /mnt/MEDIA/个人生活
 | 想要的功能 | Linux | macOS | Windows |
 | --- | --- | --- | --- |
 | 视频缩略图 / 时长 / 转码 | `sudo apt install ffmpeg` | `brew install ffmpeg` | `winget install Gyan.FFmpeg` |
-| VLC 播放 | `sudo apt install vlc` | `brew install --cask vlc` | `winget install VideoLAN.VLC` |
+| 放视频 | `sudo apt install vlc` | **不用装**：系统自带 QuickTime Player（装了 `brew install --cask iina` 或 vlc 会优先用它们，`.mkv` 之类就得装一个） | `winget install VideoLAN.VLC` |
 | 更快的图片缩略图 | `sudo apt install python3-pil` | `python3 -m pip install --user Pillow` | `py -3 -m pip install Pillow` |
 | RAW 全尺寸解码 | `./安装RAW支持.sh` | `python3 -m pip install --user rawpy` | `py -3 -m pip install rawpy` |
 | 弹文件夹选择框 | `zenity`（GNOME 自带） | 系统自带 `osascript` | 系统自带 PowerShell |
@@ -173,7 +182,7 @@ python3 media_browser.py /mnt/MEDIA/个人生活
 | 操作 | 效果 |
 | --- | --- |
 | **单击卡片** | 右侧打开详情面板（大图预览 + 完整信息 + EXIF） |
-| **双击卡片 / 回车** | **按类型分流**：视频 → VLC 播放；图片 → 本机看图工具打开原图 |
+| **双击卡片 / 回车** | **按类型分流**：视频 → 本机播放器；图片 → 本机看图工具打开原图（macOS 分别是 QuickTime Player / 「预览」，按钮上会写清楚是谁） |
 | **空格** | 详情面板里在浏览器内预览（视频） |
 | **← → ↑ ↓** | 在缩略图之间移动 |
 | **`Ctrl`+`A` / 顶部「☑ 全选」** | 选中**当前筛选出来的全部文件**（不只是已经滚动加载出来的那些） |
