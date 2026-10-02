@@ -282,7 +282,9 @@ def main(argv: list[str]) -> int:
     if missing:
         say("目录不存在：%s" % "、".join(missing))
         say("（现在会自动找这几个：%s）" % "、".join(default_dirs()))
-        say(" 要浏览别的地方就带上路径，例如：./启动.sh /mnt/XCS_DATA/某目录 ~/图片")
+        say(" 要浏览别的地方就带上路径，例如："
+            + ("./启动.sh ~/Pictures ~/Movies" if IS_MAC
+               else "./启动.sh /mnt/XCS_DATA/某目录 ~/图片"))
         return 1
 
     ips = lan_ips()

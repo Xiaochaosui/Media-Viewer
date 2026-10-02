@@ -70,6 +70,19 @@
 （本机地址 + 手机地址），浏览器自动打开。已经在跑的时候再点，它只会把浏览器叫到前台，
 不会起第二个实例。想看扫描日志就用 `./启动.sh`，或应用菜单里的「媒体浏览器（带日志窗口）」。
 
+**在 macOS 上**，桌面和程序坞用的是原生应用包（点起来和 Linux 的桌面图标一模一样）：
+
+```bash
+cd /Users/xiaochaosui/xcs/projects/Media-Viewer
+./打包/构建macOS应用.sh          # → /Applications/媒体浏览器.app + 桌面图标 + 程序坞图标
+./打包/构建macOS应用.sh --no-dock # 不想动程序坞就加这个
+```
+
+它会用 Pillow 画一枚图标、组装 `.app`（`LSUIElement`：跑起来不占程序坞），
+再把图标铺到桌面（一份拷贝，双击就是应用本身）和程序坞（写 Dock 的 `persistent-apps`）里。
+**工程搬家后重跑一遍，启动器里的路径就跟着更新了** —— 所以别手改 `.app` 里的脚本，改这个构建脚本。
+macOS 的日志在 `~/Library/Logs/media-browser/启动.log`。
+
 命令行方式：
 
 ```bash
@@ -114,7 +127,7 @@ python3 media_browser.py /mnt/MEDIA/个人生活
 | 平台 | 双击这个 | 等价的命令行 | 说明 |
 | --- | --- | --- | --- |
 | Linux | 桌面「媒体浏览器」图标 | `./启动.sh` | zenity 选文件夹、`gio` 定位、VLC 播放 |
-| macOS | `启动.command` | `./启动.sh` | 用系统 `sips`/`qlmanage` 出缩略图、`mdls` 读时长、`open` 看图/定位 |
+| macOS | 桌面 / 程序坞「媒体浏览器」图标（`/Applications/媒体浏览器.app`，或 `启动.command`） | `./启动.sh` | 用系统 `sips`/`qlmanage` 出缩略图、`mdls` 读时长、`open` 看图/定位 |
 | Windows | `启动.bat` | `启动.bat` 或 `py -3 启动.py` | PowerShell + .NET 出缩略图、资源管理器定位、VLC 播放 |
 
 三者其实是同一个 `启动.py`（跨平台启动器），它只做几件事：找到 3.8 以上的 Python、
@@ -631,6 +644,20 @@ desktop-file-validate ~/桌面/媒体浏览器.desktop                      # �
 
 换机器/换目录时：改 `.desktop` 里的 `Exec=` 和 `Path=` 两行，再照上面覆盖一次即可。
 
+**Q：macOS 上桌面 / 程序坞的图标是怎么装的？**
+不用手动拖：跑一次构建脚本就有（本质是一个 `LSUIElement` 的 `.app`，里面只有一个指向工程目录的
+`launcher` 脚本，所以点它不弹终端、也不在程序坞里多留一个运行中的图标）。
+
+```bash
+cd /Users/xiaochaosui/xcs/projects/Media-Viewer
+./打包/构建macOS应用.sh              # 应用包 + 桌面图标（一份拷贝）+ 程序坞图标
+./打包/构建macOS应用.sh --app-only   # 只要应用包，桌面 / 程序坞都不动
+```
+
+图标是脚本用 Pillow 现画的（2×2 缩略图墙 + 播放三角）。工程搬家、或者想换图案配色，
+改脚本里那段 Python 再重跑一次 —— 程序坞里重复的旧条目会被清成一份，不会越跑越多。
+桌面那份是**拷贝**不是软链：软链在访达里显示成一个「替身」，看不出是什么应用，容易找不到。
+
 **Q：双击图标之后"什么都没发生"？**
 静默模式下**不会有终端窗口**，只有右上角一条桌面通知。如果连通知都没有，按顺序查：
 
@@ -735,9 +762,10 @@ macOS 用系统自带的 `sips`/`qlmanage`/`mdls`，Windows 用 PowerShell + .NE
 | `启动.bat` | Windows **双击**用（找 `py -3` / `python`，转发给 `启动.py`） |
 | `安装RAW支持.sh` | 装/卸 RAW 全尺寸解码库（不需要 sudo），`--check` 看状态 |
 | `迁移缓存到固态.sh` | 把 `~/.cache` 搬到 1T 固态并做软链（`--dry-run` / `--rollback`） |
-| `启动-静默.sh` | 桌面图标用的入口：后台起服务、不弹终端，起好后发桌面通知，日志写 `~/.cache/media-browser/启动.log` |
-| `媒体浏览器.desktop` | 桌面一键启动图标（静默版，`Terminal=false`；装法见 FAQ） |
-| `媒体浏览器-日志.desktop` | 带终端窗口的版本，能看实时日志（放应用菜单里） |
+| `启动-静默.sh` | 桌面 / 程序坞图标用的入口：后台起服务、不弹终端，起好后发系统通知（macOS 走 `osascript`，Linux 走 `notify-send`/`zenity`）；日志写 `~/Library/Logs/media-browser/启动.log`（Linux 是 `~/.cache/media-browser/启动.log`） |
+| `媒体浏览器.desktop` | Linux 桌面一键启动图标（静默版，`Terminal=false`；装法见 FAQ） |
+| `媒体浏览器-日志.desktop` | Linux 带终端窗口的版本，能看实时日志（放应用菜单里） |
+| `打包/构建macOS应用.sh` | macOS 专用：生成 `/Applications/媒体浏览器.app` + 桌面图标 + 程序坞图标（换目录后重跑一次） |
 | `config.json` | 可选配置文件；界面里加的目录记在它的 `extra_roots` 里（不存在则用默认值）。**含口令，已在 .gitignore 里排除** |
 | `config.example.json` | 配置模板，抄成 `config.json` 再改 |
 | `LICENSE.md` | MIT 许可证 |
