@@ -28,6 +28,7 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import hmac
 import json
@@ -250,6 +251,46 @@ def friendly_viewer_name(path: str | None) -> str:
         return "照片（Windows 图片查看器）"
     return name
 
+
+def write_problem(target) -> str:
+    """这个位置能不能写？能写返回空串，不能写返回一句**给人看**的原因。
+
+    整理文件（改名 / 移动 / 新建文件夹）之前先问一句这个，比让用户对着
+    「[Errno 30] Read-only file system」发呆强得多 —— macOS 上外接 NTFS 盘
+    就是只读挂载的，非常常见。
+    """
+    try:
+        p = Path(target).expanduser()
+        d = p if p.is_dir() else p.parent
+    except OSError:
+        d = Path(target).parent
+    try:
+        flag = getattr(os, "ST_RDONLY", 1)
+        if os.statvfs(str(d)).f_flag & flag:
+            extra = ""
+            if IS_MAC:
+                extra = ("（macOS 读 NTFS 盘默认只能读不能写）"
+                         "。要么先把文件拷到本机磁盘（比如 ~/Pictures）再整理，"
+                         "要么装个 NTFS 写入支持：Mounty / macFUSE + ntfs-3g / Paragon NTFS")
+            return "%s 是只读挂载的盘%s" % (d, extra)
+        if not os.access(str(d), os.W_OK):
+            return ("%s 没有写权限（当前用户改不了这里）：换个目录，"
+                    "或者改一下文件夹权限再来" % d)
+    except OSError as e:
+        return "检查写权限失败：%s" % e
+    return ""
+
+
+def os_error_text(e: Exception, target=None) -> str:
+    """把 OSError 翻译成人话（只读盘 / 没权限是最常见的两种）。"""
+    err = getattr(e, "errno", None)
+    if err in (errno.EROFS, errno.EACCES, errno.EPERM):
+        note = write_problem(target) if target else ""
+        if note:
+            return note
+        return "没有写权限：%s" % e
+    return str(e)
+
 try:  # Pillow 可选
     from PIL import Image, ImageOps  # type: ignore
     from PIL import ExifTags  # type: ignore
@@ -299,8 +340,10 @@ def _ffmpeg_thumb(src: Path, dst: Path, px: int, seek: float) -> bool:
         "-y", str(tmp),
     ]
     try:
+        # 40 秒上限：正常一帧几秒就出来了；坏文件/转不动的也绝不能拖住整个界面
+        # （超时就当失败，记进 _failed，之后同一条不再重试）
         r = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                           stderr=subprocess.PIPE, timeout=90)
+                           stderr=subprocess.PIPE, timeout=40)
         if r.returncode == 0 and tmp.exists() and tmp.stat().st_size > 0:
             os.replace(tmp, dst)
             return True
@@ -330,14 +373,14 @@ def _sys_thumb(src: Path, dst: Path, px: int) -> bool:
             r = subprocess.run([SIPS, "-s", "format", "jpeg", "-Z", str(px),
                                 str(src), "--out", str(tmp)],
                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                               stderr=subprocess.DEVNULL, timeout=60)
+                               stderr=subprocess.DEVNULL, timeout=20)
             ok = r.returncode == 0 and tmp.exists() and tmp.stat().st_size > 0
         elif MAGICK:
             r = subprocess.run([MAGICK, str(src), "-auto-orient",
                                 "-resize", "%dx%d>" % (px, px * 2),
                                 "-quality", "84", str(tmp)],
                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                               stderr=subprocess.DEVNULL, timeout=60)
+                               stderr=subprocess.DEVNULL, timeout=20)
             ok = r.returncode == 0 and tmp.exists() and tmp.stat().st_size > 0
         elif IS_WIN and POWERSHELL:
             ps = (
@@ -374,9 +417,11 @@ def _ql_thumb(src: Path, dst: Path, px: int) -> bool:
     outdir = dst.parent / ("ql-" + hashlib.sha1(str(src).encode()).hexdigest()[:8])
     try:
         outdir.mkdir(parents=True, exist_ok=True)
+        # 15 秒上限：QuickLook 只是最后备胎，坏文件/怪格式不该让请求挂在那儿
+        # （实测某些损坏的 .heic 能让 qlmanage 干等一分半，把浏览器的连接占满）
         r = subprocess.run([QLMANAGE, "-t", "-s", str(px), "-o", str(outdir), str(src)],
                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL, timeout=90)
+                           stderr=subprocess.DEVNULL, timeout=15)
         if r.returncode != 0:
             return False
         made = sorted(outdir.glob(src.name + "*"))
@@ -1479,6 +1524,7 @@ class Library:
             out = []
             for i, r in enumerate(self.roots):
                 visible = [x for x in items if x["root"] == i and not x.get("paired_hidden")]
+                note = write_problem(r)          # 只读挂载（macOS 上的 NTFS 盘）要提前告诉界面
                 out.append({
                     "key": self.root_keys[i],
                     "path": str(r),
@@ -1488,6 +1534,8 @@ class Library:
                     "videos": len([x for x in visible if x["kind"] == "video"]),
                     "images": len([x for x in visible if x["kind"] == "image"]),
                     "kind": "local",
+                    "writable": not note,
+                    "write_note": note,
                 })
             for i, rr in enumerate(self.remotes):
                 ri = len(self.roots) + i
@@ -1562,11 +1610,13 @@ class Library:
         except OSError as e:
             raise ValueError("读不了这个目录：%s（%s）" % (cur, e))
         parent = str(cur.parent) if cur != roots[ri] else ""
+        note = write_problem(cur)
         return {"path": str(cur), "parent": parent, "dirs": dirs,
                 "roots": [{"key": self.root_keys[i], "path": str(r), "name": r.name or str(r)}
                           for i, r in enumerate(roots)],
                 "here_files": counts.get(str(cur), 0),
-                "is_root": cur == roots[ri]}
+                "is_root": cur == roots[ri],
+                "writable": not note, "write_note": note}
 
     def move_items(self, ids: list[str], dest: str, on_conflict: str = "rename",
                    mkdir: bool = False, progress=None) -> dict:
@@ -1641,11 +1691,13 @@ class Library:
                 shutil.move(str(src), str(target))
                 moved.append(src.name)
             except Exception as e:
-                errors.append("%s：%s" % (src.name, e))
+                errors.append("%s：%s" % (src.name, os_error_text(e, destp)))
         if progress:
             progress(total, total, "")
+        if moved or renamed:
+            self.scan()            # 索引跟着刷新（和 rename_items 一样，免得列表还指着老路径）
         return {"moved": len(moved), "renamed": renamed, "skipped": skipped,
-                "errors": errors, "dest": str(destp), "total": total}
+                "missing": missing, "errors": errors, "dest": str(destp), "total": total}
 
     # -- 重命名（本机执行；RAW 配对与 sidecar 一起改，缩略图缓存跟着搬） ------
     @staticmethod
@@ -1832,7 +1884,7 @@ class Library:
                         pass
                 temp = [x for x in temp if x[2] not in [p[0] for p in pair_list]]
                 row["status"] = "error"
-                row["detail"] = str(e)
+                row["detail"] = os_error_text(e, f)
                 failed += 1
                 continue
             for f, t in pair_list:
@@ -1859,7 +1911,7 @@ class Library:
                 ok += 1
             except Exception as e:
                 row["status"] = "error"
-                row["detail"] = str(e)
+                row["detail"] = os_error_text(e, row.get("path"))
                 failed += 1
 
         skipped = sum(1 for r in plan if r.get("status") == "skipped")
@@ -1878,11 +1930,14 @@ class Library:
                 "total": len(plan), "results": out}
 
     def _id_after(self, old_id: str, new_name: str) -> str:
-        """改名后的新条目 id（拿旧 id 换掉最后一段文件名；拿不到就原样返回）。"""
+        """改名后的新条目 id：只换掉最后一段文件名，根目录前缀（xxxx:）和中间路径都留着。"""
         if not old_id or not new_name:
             return old_id
         head, sep, _ = old_id.rpartition("/")
-        return (head + sep + new_name) if sep else new_name
+        if sep:
+            return head + sep + new_name
+        root, colon, _ = old_id.partition(":")      # 直接在素材目录根下：id 形如 "9becdbd3:名字.jpg"
+        return (root + colon + new_name) if colon else new_name
 
     def _move_cache(self, old: Path, new: Path) -> None:
         """文件改名后把缩略图和元信息缓存也挪过去（省得重新生成一遍）。"""
@@ -4123,12 +4178,15 @@ class Handler(BaseHTTPRequestHandler):
         newp = Path(base).expanduser() / name
         if lib.root_of_path(newp) < 0:
             return self._err("只能建在已加入的素材目录里面：%s" % base)
+        note = write_problem(newp)                 # 只读盘 / 没权限先拦下来，别抛 errno
+        if note:
+            return self._err("在这儿建不了文件夹：%s" % note)
         try:
             if newp.exists():
                 return self._err("已经有同名文件夹了：%s" % name)
             newp.mkdir(parents=True)
         except OSError as e:
-            return self._err("新建失败：%s" % e)
+            return self._err("新建失败：%s" % os_error_text(e, newp))
         self._json({"ok": True, "path": str(newp), "name": name,
                     "message": "已新建文件夹 %s" % name})
 
@@ -4153,10 +4211,24 @@ class Handler(BaseHTTPRequestHandler):
         on_conflict = str(body.get("on_conflict") or "rename").lower()
         if on_conflict not in ("rename", "skip", "overwrite"):
             on_conflict = "rename"
+        # 只读盘（macOS 上的 NTFS 外接盘就是这样）提前说清楚，别等用户点了「改名」才报 errno
+        blocked = ""
+        dirs: set = set()
+        with APP.lib.lock:
+            for i in ids:
+                it = APP.lib.items.get(i) or {}
+                if it.get("path"):
+                    dirs.add(str(Path(it["path"]).parent))
+        for d in sorted(dirs):
+            blocked = write_problem(d)
+            if blocked:
+                break
+        if blocked:
+            return self._err("改不了名：%s" % blocked)
         try:
             res = APP.lib.rename_items(ids, spec, on_conflict=on_conflict, dry_run=dry)
         except Exception as e:
-            return self._err("改名失败：%s" % e)
+            return self._err("改名失败：%s" % os_error_text(e))
 
         rows = res.get("results") or []
         if dry:
@@ -4221,6 +4293,20 @@ class Handler(BaseHTTPRequestHandler):
                 dest = str(Path(base).expanduser() / new_folder)
             if not dest:
                 return self._err("请选择目标文件夹")
+            note = write_problem(dest)             # 只读盘 / 没权限：直接告诉用户为什么
+            if note:
+                return self._err("移不过去：%s" % note)
+            # 源头也得能写：只读盘上的文件搬走要「删源文件」，一样会被系统挡回来
+            src_dirs: dict = {}
+            with APP.lib.lock:
+                for i in ids:
+                    it = APP.lib.items.get(i) or {}
+                    if it.get("path"):
+                        src_dirs.setdefault(str(Path(it["path"]).parent), it["path"])
+            for d in sorted(src_dirs):
+                note = write_problem(d)
+                if note:
+                    return self._err("搬不走：%s" % note)
             jid = APP.start_job("move", len(ids), note="移动到 %s" % dest)
         except ValueError as e:
             return self._err(str(e))
@@ -4237,6 +4323,9 @@ class Handler(BaseHTTPRequestHandler):
                     msg += "；%d 个重名已自动改名" % len(res["renamed"])
                 if res["skipped"]:
                     msg += "；跳过 %d 个" % len(res["skipped"])
+                if res.get("missing"):
+                    msg += ("；%d 个在列表里找不到了（多半是刚才已经被移动/删除，"
+                            "刷新一下列表就好）" % len(res["missing"]))
                 if res["errors"]:
                     msg += "；%d 个失败" % len(res["errors"])
                 APP.job_update(jid, state="done", done=res["total"], message=msg,

@@ -210,6 +210,7 @@
   .tag.config{border-color:#4a4030;color:#e0bb80}
   .tag.extra{border-color:#2f4a3a;color:#7fd0a0}
   .tag.remote{border-color:#4a3a63;color:#c0a0ea}
+  .tag.ro{border-color:#4a3a30;color:var(--warn);cursor:help}
   .bg.k-net{background:#3a2c63cc;color:#d8c8ff}
   .rrow .rm{background:none;border:1px solid var(--line);color:var(--fg3);
     border-radius:8px;padding:4px 9px}
@@ -509,6 +510,7 @@
         <span class="path" id="movePath">…</span>
         <span class="tag" id="moveInRoot"></span>
       </div>
+      <div class="mhint" id="moveWarn" style="display:none;color:var(--warn)"></div>
       <div class="flist" id="moveList"></div>
 
       <div class="msec">
@@ -678,6 +680,7 @@ const S = {
   roots: [], multi: false, suggestions: [], cfgPath: "",
   remote: false, readonly: false, tokenURL: "", detail: null,
   loadSeq: 0, loadQueued: false,
+  known: new Map(),          // id → 条目：列表重载会清空 items，这个留着兜底（点按钮时不至于找不到人）
 };
 
 /* 局域网客户端：不管有没有口令，都不能让服务器那台电脑弹程序（VLC / 看图工具 / 选择框），
@@ -839,6 +842,7 @@ async function load(reset) {
     const frag = document.createDocumentFragment();
     for (const it of j.items) {
       S.items.push(it);
+      S.known.set(it.id, it);
       frag.appendChild(card(it));
     }
     grid.appendChild(frag);
@@ -1132,9 +1136,15 @@ function bindDetail(d) {
   };
   if ($i("cpDec")) $i("cpDec").onclick = () => copyText(d.raw_decoded.path, "解码结果路径已复制");
   if ($i("dreveal")) $i("dreveal").onclick = () => reveal(d.id);
-  if ($i("dmove")) $i("dmove").onclick = () => openMove([d.id]);
+  if ($i("dmove")) $i("dmove").onclick = () => {
+    const n = roNote(d.id);
+    if (n) return toast("移不了：" + n, "err", 8000);
+    openMove([d.id]);
+  };
   if ($i("drename")) $i("drename").onclick = () => {
     if (d.remote) return toast("远程服务器上的文件不能改名，先下载到本机再整理", "err", 4500);
+    const n = roNote(d.id);
+    if (n) return toast("改不了名：" + n, "err", 8000);
     openRename([d.id]);
   };
   if ($i("dfetch")) $i("dfetch").onclick = () => openItems([d.id], "auto");
@@ -1236,7 +1246,16 @@ async function openItems(ids, target = "auto") {
     toast(j.message, "ok", 4200);
   } catch (e) { toast("打开失败：" + e.message, "err", 5000); }
 }
-const itemOf = (id) => S.items.find(x => x.id === id) || {};
+const itemOf = (id) => S.items.find(x => x.id === id) || S.known.get(id) || {};
+/* 这条素材所在的目录是不是只读（macOS 上的 NTFS 盘）？只读就尽早告诉用户，别等操作失败 */
+function roNote(id) {
+  const key = String(id || "").split(":")[0];
+  const r = (S.roots || []).find(x => x.key === key);
+  return (r && r.writable === false) ? (r.write_note || "这个目录不能写") : "";
+}
+function roNoteAny(ids) {
+  return [...new Set((ids || []).map(roNote).filter(Boolean))].join("；");
+}
 const kindOf = (id) => itemOf(id).kind || "";
 const hasRAW = (id) => { const it = itemOf(id); return !!(it.raw || it.kind === "raw"); };
 // 「RAW 原图」勾上、并且真的能解（rawpy）或有 RAW 软件时才优先走 RAW
@@ -1448,7 +1467,12 @@ $("rawDecodeAll").onclick = async () => {
   } catch (e) { toast("解码失败：" + e.message, "err", 5000); }
 };
 $("selClear").onclick = clearSelection;
-$("selMove").onclick = () => openMove(selectedIDs(true));
+$("selMove").onclick = () => {
+  const ids = selectedIDs(true);
+  const n = roNoteAny(ids);
+  if (n) return toast("移不了：" + n, "err", 8000);
+  openMove(ids);
+};
 $("selDecode").onclick = () => decodeRAW(
   selectedIDs(true).filter(i => hasRAF(itemOf(i))),
   "解码选中的 RAW");
@@ -1561,7 +1585,10 @@ function renderRoots() {
         <span class="d">${r.videos || 0} 个视频 · ${r.images || 0} 张图片${r.count ? "" : " · 空目录"}${
           isRemote ? (r.online ? " · 在线" : " · <span style='color:var(--err)'>连不上</span>") : ""}</span>
       </span>
-      <span class="tag remote">${isRemote ? "远程服务器" : esc(SRC_LABEL[r.source] || r.source)}</span>`;
+      <span class="tag remote">${isRemote ? "远程服务器" : esc(SRC_LABEL[r.source] || r.source)}</span>${
+        r.writable === false
+          ? `<span class="tag ro" title="${esc(r.write_note || "这个目录不能写")}">🔒 只读</span>`
+          : ""}`;
     const rm = document.createElement("button");
     rm.className = "rm";
     rm.textContent = "移除";
@@ -1715,7 +1742,8 @@ async function decodeRAW(ids, title) {
 }
 
 /* ------------------------------------------------- 移动到…（分类整理） */
-const MV = { ids: [], path: "", parent: "", isRoot: false, roots: [], busy: false, dest: "" };
+const MV = { ids: [], path: "", parent: "", isRoot: false, roots: [], busy: false, dest: "",
+             writable: true, writeNote: "" };
 
 function openMove(ids) {
   if (roBlock("移动文件")) return;
@@ -1728,11 +1756,12 @@ function openMove(ids) {
   $("moveBar").style.width = "0";
   $("moveJobLine").textContent = "";
   $("moveNewName").value = "";
-  // 默认打开第一个选中项所在的文件夹
+  // 默认打开第一个选中项所在的文件夹（这里必须把算好的路径传进去，
+  // 不然 loadFolder() 会退回到「第一个素材目录」，弹窗一开就跑到 ~/Pictures 去了）
   const first = itemOf(list[0]) || {};
   MV.path = first.path ? first.path.replace(/\/[^/]*$/, "") : "";
   $("moveModal").classList.add("on");
-  loadFolder();
+  loadFolder(MV.path || undefined);
 }
 function closeMove() {
   if (MV.busy) return;
@@ -1762,10 +1791,25 @@ async function loadFolder(path) {
       el.onclick = () => loadFolder(el.dataset.path);
     });
     MV.dest = j.path;
+    MV.writable = j.writable !== false;
+    MV.writeNote = j.write_note || "";
+    syncMoveWritable();
     updateMoveHint();
   } catch (e) {
     list.innerHTML = `<div class="none">读不了这个文件夹：${esc(e.message)}</div>`;
   }
+}
+/* 目标目录是只读的（macOS 上的 NTFS 外接盘就是）→ 提前说清楚，并把「移到这里」按住 */
+function syncMoveWritable() {
+  const warn = $("moveWarn");
+  if (warn) {
+    warn.style.display = MV.writable ? "none" : "";
+    warn.textContent = MV.writable ? "" : "🔒 这个文件夹不能写：" + MV.writeNote;
+  }
+  const go = $("moveGo");
+  if (go && !MV.busy) go.disabled = !MV.writable;
+  const mk = $("moveNewGo");
+  if (mk && !MV.busy) mk.disabled = !MV.writable;
 }
 function updateMoveHint() {
   const n = MV.ids.length;
@@ -1923,6 +1967,14 @@ function openRename(ids) {
   $("rnGo").disabled = false;
   $("rnClose").disabled = false;
   $("rnModal").classList.add("on");
+  const blocked = roNoteAny(list);            // 只读目录（macOS 上的 NTFS 盘）当场说清楚
+  if (blocked) {
+    $("rnPreview").innerHTML = `<div class="none">🔒 ${esc(blocked)}</div>`;
+    $("rnPreviewCount").textContent = "";
+    $("rnHint").textContent = "这个目录不能写，改名做不了";
+    $("rnGo").disabled = true;
+    return;
+  }
   if (!RN.single) setRnMode(RN.mode || "affix");
   rnPreview();
   setTimeout(() => { if (RN.single) { $("rnName").focus(); $("rnName").select(); } }, 60);
@@ -1997,6 +2049,8 @@ async function rnPreview() {
     $("rnGo").disabled = !will;
   } catch (e) {
     box.innerHTML = `<div class="none">预览失败：${esc(e.message)}</div>`;
+    RN.plan = null;
+    $("rnGo").disabled = true;               // 预览都不成（多半是只读盘），别让点了白点
   }
 }
 function rnLater() {                       // 输入时抖一下再预览，别每敲一个字就请求
@@ -2041,7 +2095,12 @@ $("rnGo").onclick = async () => {
     toast("改名失败：" + e.message, "err", 5000);
   }
 };
-$("selRename").onclick = () => openRename(selectedIDs(true));
+$("selRename").onclick = () => {
+  const ids = selectedIDs(true);
+  const n = roNoteAny(ids);
+  if (n) return toast("改不了名：" + n, "err", 8000);
+  openRename(ids);
+};
 
 /* --------------------------------------------------------------- 启动 */
 (function init() {
